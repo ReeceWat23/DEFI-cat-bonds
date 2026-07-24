@@ -144,10 +144,6 @@ contract CatBond is ReentrancyGuard {
         uint16   _couponRateBps,
         uint256  _coverageAmount,
         uint256  _minInvestment,
-        uint256  _industrylosslimit, // in usd 
-        
-        uint256  _economiclosslimit, // in usd 
-
         uint256  _subscriptionDuration,
         uint256  _termDuration
     ) {

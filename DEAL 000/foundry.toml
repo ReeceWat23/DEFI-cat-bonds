@@ -1,0 +1,15 @@
+[profile.default]
+src     = "src"
+script  = "script"
+out     = "out"
+libs    = ["../lib"]
+
+remappings = [
+    "forge-std/=../lib/forge-std/src/",
+    "@openzeppelin/=../lib/openzeppelin-contracts/",
+    "catbond/=src/catbond/",
+]
+
+solc_version   = "0.8.20"
+optimizer      = true
+optimizer_runs = 200

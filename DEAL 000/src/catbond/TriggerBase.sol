@@ -5,13 +5,11 @@ import "./ITrigger.sol";
 
 /// @title TriggerBase
 /// @notice Reference implementation of ITrigger. Owner can manually flip the trigger.
-
 ///         Real deal-specific triggers extend this contract. For example, a FloodTrigger
 ///         would override isTriggered() to read a Chainlink Data Feed:
 ///
 ///         // --- Chainlink integration point ---
 ///         // AggregatorV3Interface internal _oracle;
-
 ///         // function isTriggered() public view override returns (bool) {
 ///         //     (, int256 answer,,,) = _oracle.latestRoundData();
 ///         //     return answer >= int256(FLOOD_THRESHOLD);
