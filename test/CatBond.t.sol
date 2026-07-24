@@ -92,6 +92,8 @@ contract CatBondTest is Test {
             uint16(COUPON_BPS),
             COVERAGE,
             MIN_INVEST,
+            0,
+            0,
             SUB_DURATION,
             TERM_DURATION
         );
@@ -426,7 +428,7 @@ contract CatBondTest is Test {
         TestTrigger bigTrig = new TestTrigger(companyWallet);
         CatBond bigBond = new CatBond(
             sponsor, companyWallet, address(bigTrig), address(bigUsdc),
-            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, SUB_DURATION, TERM_DURATION
+            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, 0, 0, SUB_DURATION, TERM_DURATION
         );
 
         // Sponsor funds
@@ -519,6 +521,8 @@ contract CatBondTest is Test {
             uint16(COUPON_BPS),
             principal,   // $25k coverage — one investor fills it exactly
             principal,   // $25k minimum
+            0,
+            0,
             1,           // 1-second subscription window
             TERM_DURATION
         );

@@ -73,6 +73,8 @@ contract Setup is Script {
             COUPON_BPS,
             COVERAGE,
             MIN_INVEST,
+            150_000_000_000,  // $150B industry (insured) loss limit
+            370_000_000_000,  // $370B economic loss trigger threshold
             subDuration,
             termDuration
         );

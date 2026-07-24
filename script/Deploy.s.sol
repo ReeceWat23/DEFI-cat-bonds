@@ -25,9 +25,11 @@ contract ManualTrigger is TriggerBase {
 ///   USDC_ADDRESS     — USDC contract on the target network
 ///
 /// Optional overrides (defaults below match the $75k demo bond):
-///   COUPON_BPS           — annualised coupon in basis points (default 500 = 5%)
+///   COUPON_BPS           — flat coupon rate in basis points (default 500 = 5% of coverage)
 ///   COVERAGE_AMOUNT      — max USDC principal, 6-decimal (default 75_000e6 = $75k)
 ///   MIN_INVESTMENT       — minimum per investor, 6-decimal (default 25_000e6 = $25k)
+///   INDUSTRY_LOSS_LIMIT  — industry insured loss trigger threshold in USD (default 0 = unset)
+///   ECONOMIC_LOSS_LIMIT  — total economic loss trigger threshold in USD (default 0 = unset)
 ///   SUBSCRIPTION_SECONDS — subscription window length (default 604800 = 7 days)
 ///   TERM_SECONDS         — bond term length (default 31536000 = 365 days)
 contract DeployScript is Script {
@@ -36,11 +38,13 @@ contract DeployScript is Script {
         address companyWallet  = vm.envAddress("COMPANY_WALLET");
         address usdcAddress    = vm.envAddress("USDC_ADDRESS");
 
-        uint16  couponBps      = uint16(vm.envOr("COUPON_BPS",           uint256(500)));
-        uint256 coverage       = vm.envOr("COVERAGE_AMOUNT",             uint256(75_000e6));
-        uint256 minInvestment  = vm.envOr("MIN_INVESTMENT",              uint256(25_000e6));
-        uint256 subDuration    = vm.envOr("SUBSCRIPTION_SECONDS",        uint256(7 days));
-        uint256 termDuration   = vm.envOr("TERM_SECONDS",                uint256(365 days));
+        uint16  couponBps         = uint16(vm.envOr("COUPON_BPS",           uint256(500)));
+        uint256 coverage          = vm.envOr("COVERAGE_AMOUNT",             uint256(75_000e6));
+        uint256 minInvestment     = vm.envOr("MIN_INVESTMENT",              uint256(25_000e6));
+        uint256 industryLossLimit = vm.envOr("INDUSTRY_LOSS_LIMIT",         uint256(0));
+        uint256 economicLossLimit = vm.envOr("ECONOMIC_LOSS_LIMIT",         uint256(0));
+        uint256 subDuration       = vm.envOr("SUBSCRIPTION_SECONDS",        uint256(7 days));
+        uint256 termDuration      = vm.envOr("TERM_SECONDS",                uint256(365 days));
 
         vm.startBroadcast();
 
@@ -56,6 +60,8 @@ contract DeployScript is Script {
             couponBps,
             coverage,
             minInvestment,
+            industryLossLimit,
+            economicLossLimit,
             subDuration,
             termDuration
         );

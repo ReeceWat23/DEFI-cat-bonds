@@ -128,6 +128,8 @@ contract RemixTest {
             uint16(COUPON_BPS),
             coverage,
             minInvest,
+            0,
+            0,
             subDuration,
             termDuration
         );
@@ -190,11 +192,11 @@ contract RemixTest {
         // ── Advance to full maturity; all investors claim remaining coupon ────
         bond.advanceTime(TERM_DURATION / 2);
 
-        uint256 fullCoupon = 25_000e6 * COUPON_BPS * TERM_DURATION / (10_000 * 365 days);
+        uint256 fullCoupon = 25_000e6 * COUPON_BPS / 10_000;  // flat rate on principal
 
         inv1.claimCoupon();  // collects remaining half
         require(inv1.balance() == fullCoupon,
-            "FAIL: inv1 total coupon should equal full annual coupon at maturity");
+            "FAIL: inv1 total coupon should equal full flat-rate coupon at maturity");
 
         inv2.claimCoupon();
         require(inv2.balance() == fullCoupon, "FAIL: inv2 coupon mismatch");
@@ -241,9 +243,8 @@ contract RemixTest {
         _investorDeposit(usdc, inv, principal);
         _closeSubscription(bond);  // advances mockTime by 2s, sets activeStart
 
-        // Full coupon over 2-hour term at 5% p.a.
-        // (small number because 2h is a tiny fraction of a year — ratio is what matters)
-        uint256 totalCoupon = principal * COUPON_BPS * TWO_HOURS / (10_000 * 365 days);
+        // Full coupon over 2-hour term: flat rate on principal (not annualized)
+        uint256 totalCoupon = principal * COUPON_BPS / 10_000;
 
         // ── t = 1 hour (50% of term elapsed) ─────────────────────────────────
         bond.advanceTime(ONE_HOUR);
@@ -300,8 +301,8 @@ contract RemixTest {
 
         // Investor can only claim coupon vested up to settlementTime (25% of full term)
         inv1.claimCoupon();
-        uint256 fullCoupon    = 25_000e6 * COUPON_BPS * TERM_DURATION / (10_000 * 365 days);
-        uint256 quarterCoupon = fullCoupon * (TERM_DURATION / 4) / TERM_DURATION;
+        uint256 fullCoupon    = 25_000e6 * COUPON_BPS / 10_000;  // flat rate
+        uint256 quarterCoupon = fullCoupon / 4;
         require(inv1.balance() == quarterCoupon,
             "FAIL: investor should only receive coupon vested up to settlement");
 

@@ -80,6 +80,8 @@ contract CatBond is ReentrancyGuard {
     uint16  public immutable couponRateBps;
     uint256 public immutable coverageAmount;
     uint256 public immutable minInvestment;
+    uint256 public immutable industryLossLimit;
+    uint256 public immutable economicLossLimit;
     uint256 public immutable subscriptionDuration;
     uint256 public immutable termDuration;
     uint256 public immutable requiredCouponBudget;
@@ -144,6 +146,10 @@ contract CatBond is ReentrancyGuard {
         uint16   _couponRateBps,
         uint256  _coverageAmount,
         uint256  _minInvestment,
+        uint256  _industrylosslimit, // in usd 
+        
+        uint256  _economiclosslimit, // in usd 
+
         uint256  _subscriptionDuration,
         uint256  _termDuration
     ) {
@@ -154,6 +160,8 @@ contract CatBond is ReentrancyGuard {
         couponRateBps        = _couponRateBps;
         coverageAmount       = _coverageAmount;
         minInvestment        = _minInvestment;
+        industryLossLimit    = _industrylosslimit;
+        economicLossLimit    = _economiclosslimit;
         subscriptionDuration = _subscriptionDuration;
         termDuration         = _termDuration;
 
