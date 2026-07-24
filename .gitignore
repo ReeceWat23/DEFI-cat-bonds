@@ -4,7 +4,7 @@ out/
 
 # Foundry dependencies — install locally with: forge install
 # (not committed; use git submodules or forge install after cloning)
-lib/
+/lib/
 
 # Claude Code session data (local only)
 .claude/
