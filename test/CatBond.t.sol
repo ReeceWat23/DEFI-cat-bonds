@@ -46,7 +46,8 @@ contract MockUSDC {
 // Concrete trigger for testing
 // ─────────────────────────────────────────────────────────────────────────────
 contract TestTrigger is TriggerBase {
-    constructor(address _owner) TriggerBase(_owner) {}
+    // lossLimit=1 so report() can fire the trigger with any real loss value in tests
+    constructor(address _owner) TriggerBase(_owner, 1, 0) {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,8 +93,6 @@ contract CatBondTest is Test {
             uint16(COUPON_BPS),
             COVERAGE,
             MIN_INVEST,
-            0,
-            0,
             SUB_DURATION,
             TERM_DURATION
         );
@@ -428,7 +427,7 @@ contract CatBondTest is Test {
         TestTrigger bigTrig = new TestTrigger(companyWallet);
         CatBond bigBond = new CatBond(
             sponsor, companyWallet, address(bigTrig), address(bigUsdc),
-            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, 0, 0, SUB_DURATION, TERM_DURATION
+            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, SUB_DURATION, TERM_DURATION
         );
 
         // Sponsor funds
@@ -521,8 +520,6 @@ contract CatBondTest is Test {
             uint16(COUPON_BPS),
             principal,   // $25k coverage — one investor fills it exactly
             principal,   // $25k minimum
-            0,
-            0,
             1,           // 1-second subscription window
             TERM_DURATION
         );
@@ -662,4 +659,120 @@ contract CatBondTest is Test {
         assertLe(claim1 + claim2, cap, "two claims must not exceed full coupon");
     }
 }
-// TEMP DEBUG TEST — delete after diagnosis
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trigger report() tests
+// Covers: ZeroLossLimit guard, threshold-based auto-fire, below-threshold no-fire,
+//         state updates on each report, and end-to-end settle after report fires.
+// ─────────────────────────────────────────────────────────────────────────────
+contract TriggerReportTest is Test {
+
+    address owner   = address(0xA1);
+    address other   = address(0xB1);
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+
+    function _triggerWithLimit(uint256 limit) internal returns (TestTriggerConfigurable) {
+        return new TestTriggerConfigurable(owner, limit, 1);
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    function test_Trigger_ZeroLossLimitReverts() public {
+        vm.expectRevert(TriggerBase.ZeroLossLimit.selector);
+        new TestTriggerConfigurable(owner, 0, 0);
+    }
+
+    function test_Trigger_ReportBelowThreshold_DoesNotFire() public {
+        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);  // $370B
+        assertFalse(trig.isTriggered(), "should not be triggered initially");
+
+        vm.prank(owner);
+        trig.report(142_000_000_000, "Gallagher Re H1 2026");  // $142B < $370B
+
+        assertFalse(trig.isTriggered(), "should not fire below threshold");
+        assertEq(trig.reportedValue(),  142_000_000_000,        "reportedValue must update");
+        assertEq(trig.reportedSource(), "Gallagher Re H1 2026", "reportedSource must update");
+    }
+
+    function test_Trigger_ReportAtThreshold_Fires() public {
+        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);
+
+        vm.prank(owner);
+        trig.report(370_000_000_000, "Gallagher Re Full-Year 2026");  // exactly at limit
+
+        assertTrue(trig.isTriggered(), "trigger must fire at exactly the threshold");
+    }
+
+    function test_Trigger_ReportAboveThreshold_Fires() public {
+        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);
+
+        vm.prank(owner);
+        trig.report(420_000_000_000, "Gallagher Re Full-Year 2026");  // $420B > $370B
+
+        assertTrue(trig.isTriggered(), "trigger must fire above threshold");
+    }
+
+    function test_Trigger_Report_OnlyOwner() public {
+        TestTriggerConfigurable trig = _triggerWithLimit(100_000_000_000);
+
+        vm.prank(other);
+        vm.expectRevert(TriggerBase.NotOwner.selector);
+        trig.report(200_000_000_000, "fake source");
+    }
+
+    function test_Trigger_ReportThenSettle_EndToEnd() public {
+        MockUSDC usdc = new MockUSDC();
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(address(this), 370_000_000_000, 1);
+
+        CatBond bond = new CatBond(
+            address(this),     // sponsor
+            address(this),     // companyWallet
+            address(trig),
+            address(usdc),
+            uint16(500),       // 5% coupon
+            75_000e6,          // $75k coverage
+            25_000e6,          // $25k min
+            1,                 // 1s subscription
+            30 days
+        );
+
+        // Fund and subscribe
+        uint256 budget = bond.requiredCouponBudget();
+        usdc.mint(address(this), budget + budget * 50 / 10_000);
+        usdc.approve(address(bond), budget + budget * 50 / 10_000);
+        bond.fundCouponBudget();
+
+        address inv = address(0xCC);
+        uint256 inv_principal = 25_000e6;
+        usdc.mint(inv, inv_principal + inv_principal * 50 / 10_000);
+        vm.prank(inv);
+        usdc.approve(address(bond), inv_principal + inv_principal * 50 / 10_000);
+        vm.prank(inv);
+        bond.deposit(inv_principal, inv_principal);
+
+        vm.warp(block.timestamp + 2);
+        bond.closeSubscription();
+
+        // Advance into term, then report a loss that fires the trigger
+        vm.warp(bond.activeStart() + 10 days);
+        trig.report(400_000_000_000, "Gallagher Re Full-Year 2026");  // $400B > $370B
+
+        assertTrue(trig.isTriggered(), "trigger must be fired after report");
+
+        // settle() should transfer investor principal to sponsor
+        uint256 sponsorBefore = usdc.balanceOf(address(this));
+        bond.settle();
+        uint256 received = usdc.balanceOf(address(this)) - sponsorBefore;
+
+        assertEq(received, inv_principal, "sponsor must receive full investor principal on settle");
+        assertEq(uint(bond.status()), uint(CatBond.Status.Triggered), "bond must be Triggered");
+    }
+}
+
+/// @dev Configurable trigger for report() tests — unlike TestTrigger (fixed limit=1),
+///      this lets each test set an arbitrary lossLimit.
+contract TestTriggerConfigurable is TriggerBase {
+    constructor(address _owner, uint256 _lossLimit, uint8 _dealType)
+        TriggerBase(_owner, _lossLimit, _dealType) {}
+}

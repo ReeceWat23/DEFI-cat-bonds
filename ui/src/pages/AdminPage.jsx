@@ -134,6 +134,8 @@ function DeploySection() {
     minInvestment: '25000',
     subDays: '7',
     termDays: '365',
+    dealType: '1',       // 0 = IndustryLoss, 1 = EconomicLoss
+    lossThresholdB: '',  // threshold in billions of USD
   })
 
   const [triggerAddr, setTriggerAddr] = useState(localStorage.getItem('catbond_trigger') || '')
@@ -196,10 +198,14 @@ function DeploySection() {
 
   function handleDeployTrigger() {
     if (!isAddress(form.companyWallet)) return alert('Enter a valid company wallet address')
+    const thresholdB = parseFloat(form.lossThresholdB)
+    if (!form.lossThresholdB || isNaN(thresholdB) || thresholdB <= 0)
+      return alert('Enter a loss threshold in billions (e.g. 370 for $370B)')
+    const lossLimit = BigInt(Math.round(thresholdB * 1e9))  // whole USD
     deployTrigger({
       abi: TRIGGER_ABI,
       bytecode: TRIGGER_BYTECODE,
-      args: [form.companyWallet],
+      args: [form.companyWallet, lossLimit, parseInt(form.dealType)],
     })
   }
 
@@ -223,6 +229,8 @@ function DeploySection() {
       alert('Invalid parameter: ' + e.message)
     }
   }
+
+  const dealTypeLabel = form.dealType === '0' ? 'Industry Loss (insured)' : 'Economic Loss (total)'
 
   const estimatedBudget = (() => {
     try {
@@ -314,6 +322,35 @@ function DeploySection() {
           />
         </div>
 
+        {/* Trigger configuration */}
+        <div className="sm:col-span-2 border border-gray-600 rounded-xl p-4 space-y-3">
+          <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Trigger Configuration</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Deal Type</label>
+              <select
+                value={form.dealType}
+                onChange={set('dealType')}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="1">Economic Loss (total)</option>
+                <option value="0">Industry Loss (insured)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {form.dealType === '0' ? 'Uses insured loss figures' : 'Uses total economic loss figures'}
+              </p>
+            </div>
+            <FormField
+              label="Loss Threshold ($B)"
+              value={form.lossThresholdB}
+              onChange={set('lossThresholdB')}
+              type="number"
+              placeholder="e.g. 370"
+              hint={`Trigger fires when reported ${dealTypeLabel} ≥ this amount`}
+            />
+          </div>
+        </div>
+
         {/* Estimated budget */}
         {estimatedBudget !== null && (
           <div className="sm:col-span-2 bg-gray-700/60 rounded-xl p-4 text-sm border border-gray-600">
@@ -333,8 +370,11 @@ function DeploySection() {
       <div className="rounded-xl border border-gray-600 p-4 mb-3">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-sm font-medium">Step 1 — Deploy ManualTrigger</div>
-            <div className="text-xs text-gray-400 mt-0.5">Owner will be the Company Wallet.</div>
+            <div className="text-sm font-medium">Step 1 — Deploy Trigger</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              Owner: Company Wallet.
+              {form.lossThresholdB && ` Threshold: $${form.lossThresholdB}B ${dealTypeLabel}.`}
+            </div>
             {triggerAddr && (
               <div className="font-mono text-xs text-green-400 mt-1 break-all">✓ {triggerAddr}</div>
             )}
@@ -422,11 +462,23 @@ function AdminAction({ title, description, onClick, disabled, label, danger = fa
   )
 }
 
+const DEAL_TYPE_LABEL = { 0: 'Industry Loss (insured)', 1: 'Economic Loss (total)' }
+
+function formatUSDWhole(n) {
+  if (n == null) return '—'
+  const b = Number(n) / 1e9
+  if (b >= 1) return `$${b.toFixed(0)}B`
+  const m = Number(n) / 1e6
+  return `$${m.toFixed(0)}M`
+}
+
 function ManageSection() {
   const { address, isConnected } = useAccount()
 
   const [bondAddress, setBondAddress] = useState(localStorage.getItem('catbond_address') || '')
   const [triggerAddress, setTriggerAddress] = useState(localStorage.getItem('catbond_trigger') || '')
+  const [reportLossB, setReportLossB] = useState('')
+  const [reportSource, setReportSource] = useState('')
 
   const validBond = isAddress(bondAddress)
   const validTrigger = isAddress(triggerAddress)
@@ -451,13 +503,22 @@ function ManageSection() {
   const [bondStatus, bondSponsor, bondCompany, bondUsdc, requiredCouponBudget, totalDeposited, coverageAmount, maturity, bondTriggerAddr] =
     bondData?.map(r => r.result) ?? []
 
-  // Read isTriggered() from the address the bond itself holds — not the UI input field.
-  // This prevents a mismatch where the UI fires a different trigger than the bond checks.
-  const { data: triggerFired, refetch: refetchTrigger } = useReadContract({
-    address: bondTriggerAddr ?? (validTrigger ? triggerAddress : undefined),
-    abi: TRIGGER_ABI,
-    functionName: 'isTriggered',
+  // Always read from the address the bond holds — never the UI input — to prevent mismatches.
+  const effectiveTriggerAddr = bondTriggerAddr ?? (validTrigger ? triggerAddress : undefined)
+
+  const { data: triggerData, refetch: refetchTrigger } = useReadContracts({
+    contracts: effectiveTriggerAddr
+      ? [
+          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'isTriggered' },
+          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'lossLimit' },
+          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'dealType' },
+          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'reportedValue' },
+          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'reportedSource' },
+        ]
+      : [],
   })
+  const [triggerFired, triggerLossLimit, triggerDealType, triggerReportedValue, triggerReportedSource] =
+    triggerData?.map(r => r.result) ?? []
 
   // USDC allowance/balance for the connected wallet (sponsor flow)
   const { data: usdcData, refetch: refetchUsdc } = useReadContracts({
@@ -475,7 +536,7 @@ function ManageSection() {
   const isBusy = isPending || isConfirming
 
   useEffect(() => {
-    if (isConfirmed) { refetchBond(); refetchTrigger(); refetchUsdc() }
+    if (isConfirmed) { refetchBond(); refetchTrigger(); refetchUsdc(); setReportLossB(''); setReportSource('') }
   }, [isConfirmed])
 
   const statusNum = Number(bondStatus ?? 0)
@@ -549,10 +610,26 @@ function ManageSection() {
                 {triggerFired === undefined ? '(loading…)' : triggerFired ? '🔴 FIRED' : '🟢 Not fired'}
               </span>
             </div>
+            {triggerLossLimit != null && (
+              <div>
+                Trigger type:{' '}
+                <span className="text-gray-300">{DEAL_TYPE_LABEL[Number(triggerDealType)] ?? '—'}</span>
+                {' · '}
+                Threshold:{' '}
+                <span className="text-gray-300">{formatUSDWhole(triggerLossLimit)}</span>
+              </div>
+            )}
+            {triggerReportedValue != null && triggerReportedValue > 0n && (
+              <div>
+                Last report:{' '}
+                <span className="text-gray-300">{formatUSDWhole(triggerReportedValue)}</span>
+                {triggerReportedSource ? <span className="text-gray-500"> — {triggerReportedSource}</span> : null}
+              </div>
+            )}
             {bondTriggerAddr && validTrigger &&
               bondTriggerAddr.toLowerCase() !== triggerAddress.toLowerCase() && (
               <div className="text-yellow-400 mt-1">
-                ⚠ Trigger address field doesn't match the bond's trigger. Fire/Reset will use your field value; status above reflects the bond's actual trigger.
+                ⚠ Trigger address field doesn't match the bond's trigger. Actions will use your field value; status above reflects the bond's actual trigger.
               </div>
             )}
           </div>
@@ -617,20 +694,66 @@ function ManageSection() {
           danger
         />
 
-        {/* Fire Trigger */}
-        <AdminAction
-          title="Fire Trigger (Manual)"
-          description="Sets the ManualTrigger to fired=true. Company wallet only (trigger owner). Use when the catastrophic event is confirmed."
-          onClick={() => writeContract({ address: triggerAddress, abi: TRIGGER_ABI, functionName: 'setTriggered', args: [true] })}
-          disabled={isBusy || !isConnected || !validTrigger || triggerFired === true}
-          label="Fire Trigger"
-          danger
-        />
+        {/* Report Loss (primary trigger path) */}
+        <div className="bg-gray-700/60 rounded-xl border border-gray-600 p-4 sm:col-span-2">
+          <div className="font-medium text-sm mb-1">Report Loss Event</div>
+          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+            Company wallet only. Submit a confirmed loss figure and its source.
+            If the value meets or exceeds the trigger threshold the bond fires automatically.
+            {triggerLossLimit != null && (
+              <span className="text-gray-300">
+                {' '}Threshold: <strong>{formatUSDWhole(triggerLossLimit)}</strong> ({DEAL_TYPE_LABEL[Number(triggerDealType)]}).
+              </span>
+            )}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Loss Value ($B)</label>
+              <input
+                type="number"
+                step="0.1"
+                value={reportLossB}
+                onChange={e => setReportLossB(e.target.value)}
+                placeholder="e.g. 142"
+                className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-0.5">Total in billions of USD</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-gray-400 mb-1">Source</label>
+              <input
+                type="text"
+                value={reportSource}
+                onChange={e => setReportSource(e.target.value)}
+                placeholder="e.g. Gallagher Re H1 2026"
+                className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const lossB = parseFloat(reportLossB)
+              if (isNaN(lossB) || lossB <= 0) return alert('Enter a loss value in billions')
+              if (!reportSource.trim()) return alert('Enter a source (e.g. Gallagher Re H1 2026)')
+              const lossUSD = BigInt(Math.round(lossB * 1e9))
+              writeContract({
+                address: triggerAddress,
+                abi: TRIGGER_ABI,
+                functionName: 'report',
+                args: [lossUSD, reportSource.trim()],
+              })
+            }}
+            disabled={isBusy || !isConnected || !validTrigger || triggerFired === true}
+            className="w-full py-2 rounded-lg text-sm font-semibold bg-orange-700 hover:bg-orange-600 text-white disabled:opacity-40 transition-colors"
+          >
+            {triggerFired ? 'Trigger already fired' : 'Submit Report'}
+          </button>
+        </div>
 
-        {/* Reset Trigger */}
+        {/* Reset Trigger (override / correction) */}
         <AdminAction
           title="Reset Trigger"
-          description="Sets ManualTrigger back to fired=false. Company wallet only. Useful if trigger was fired in error."
+          description="Override trigger back to not-fired. Company wallet only. Use for corrections — report() is the standard path."
           onClick={() => writeContract({ address: triggerAddress, abi: TRIGGER_ABI, functionName: 'setTriggered', args: [false] })}
           disabled={isBusy || !isConnected || !validTrigger || triggerFired !== true}
           label="Reset Trigger"
@@ -648,7 +771,7 @@ function ManageSection() {
 
       <div className="mt-4 text-center">
         <button
-          onClick={() => { refetchBond(); refetchTrigger(); refetchUsdc() }}
+          onClick={() => { refetchBond(); refetchTrigger(); refetchUsdc(); }}
           className="text-xs text-gray-500 hover:text-gray-300 underline"
         >
           Refresh

@@ -7,9 +7,11 @@ import "../src/RDX.sol";
 import "catbond/TriggerBase.sol";
 import "catbond/CatBond.sol";
 
-/// @dev Concrete trigger used for DEAL 000 — company wallet can flip it manually.
+/// @dev Concrete trigger for DEAL 000.
+///      Fires when total economic losses are reported >= $370B (Gallagher Re source).
 contract Deal000Trigger is TriggerBase {
-    constructor(address _owner) TriggerBase(_owner) {}
+    constructor(address _owner, uint256 _lossLimit, uint8 _dealType)
+        TriggerBase(_owner, _lossLimit, _dealType) {}
 }
 
 /// @notice Full local deployment for DEAL 000 end-to-end testing.
@@ -61,8 +63,12 @@ contract Setup is Script {
         (bool ok3,) = payable(INVESTOR).call{value: ETH_PER_WALLET}("");
         require(ok1 && ok2 && ok3, "ETH transfer failed");
 
-        // 4 — Deploy ManualTrigger (owner = company wallet)
-        Deal000Trigger trigger = new Deal000Trigger(COMPANY);
+        // 4 — Deploy trigger ($370B economic loss threshold, confirmed by Gallagher Re)
+        Deal000Trigger trigger = new Deal000Trigger(
+            COMPANY,
+            370_000_000_000,  // $370B total economic loss threshold
+            1                 // EconomicLoss (1)
+        );
 
         // 5 — Deploy CatBond
         CatBond bond = new CatBond(
@@ -73,8 +79,6 @@ contract Setup is Script {
             COUPON_BPS,
             COVERAGE,
             MIN_INVEST,
-            150_000_000_000,  // $150B industry (insured) loss limit
-            370_000_000_000,  // $370B economic loss trigger threshold
             subDuration,
             termDuration
         );

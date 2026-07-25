@@ -20,8 +20,6 @@ contract CatBondHarness is CatBond {
         uint16   _couponRateBps,
         uint256  _coverageAmount,
         uint256  _minInvestment,
-        uint256  _industrylosslimit,
-        uint256  _economiclosslimit,
         uint256  _subscriptionDuration,
         uint256  _termDuration
     )
@@ -33,8 +31,6 @@ contract CatBondHarness is CatBond {
             _couponRateBps,
             _coverageAmount,
             _minInvestment,
-            _industrylosslimit,
-            _economiclosslimit,
             _subscriptionDuration,
             _termDuration
         )

@@ -55,7 +55,8 @@ contract MockUSDC {
 // ── Manual trigger ────────────────────────────────────────────────────────────
 
 contract ManualTrigger is TriggerBase {
-    constructor(address _owner) TriggerBase(_owner) {}
+    // lossLimit=1 so report() fires with any real value in tests
+    constructor(address _owner) TriggerBase(_owner, 1, 0) {}
 }
 
 // ── Investor proxy ────────────────────────────────────────────────────────────
@@ -128,8 +129,6 @@ contract RemixTest {
             uint16(COUPON_BPS),
             coverage,
             minInvest,
-            0,
-            0,
             subDuration,
             termDuration
         );

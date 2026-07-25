@@ -4,37 +4,73 @@ pragma solidity ^0.8.20;
 import "./ITrigger.sol";
 
 /// @title TriggerBase
-/// @notice Reference implementation of ITrigger. Owner can manually flip the trigger.
-
-///         Real deal-specific triggers extend this contract. For example, a FloodTrigger
-///         would override isTriggered() to read a Chainlink Data Feed:
+/// @notice Reference implementation of ITrigger.
 ///
-///         // --- Chainlink integration point ---
-///         // AggregatorV3Interface internal _oracle;
-
-///         // function isTriggered() public view override returns (bool) {
-///         //     (, int256 answer,,,) = _oracle.latestRoundData();
-///         //     return answer >= int256(FLOOD_THRESHOLD);
-///         // }
-///         // ------------------------------------
+///   Owner calls report(lossValue, source) with a confirmed industry or economic
+///   loss figure. If lossValue >= lossLimit the trigger fires permanently.
+///   setTriggered(bool) remains available for manual overrides and corrections.
+///
+///   Real deal-specific triggers can extend this and override isTriggered() for
+///   automated oracle feeds (e.g. Chainlink). For those use cases lossLimit and
+///   dealType are still stored for UI display even if the logic doesn't use them.
 abstract contract TriggerBase is ITrigger {
+
+    // ── Constants ──────────────────────────────────────────────────────────────
+    uint8 public constant INDUSTRY_LOSS = 0;
+    uint8 public constant ECONOMIC_LOSS = 1;
+
+    // ── Storage ────────────────────────────────────────────────────────────────
     address public owner;
-    bool internal _triggered;
+    bool    internal _triggered;
 
+    uint256 public immutable lossLimit;   // threshold in whole USD
+    uint8   public immutable dealType;    // 0 = IndustryLoss, 1 = EconomicLoss
+
+    uint256 public reportedValue;
+    string  public reportedSource;
+
+    // ── Errors ─────────────────────────────────────────────────────────────────
     error NotOwner();
+    error ZeroLossLimit();
 
+    // ── Events ─────────────────────────────────────────────────────────────────
     event TriggerSet(bool triggered);
+    event TriggerReported(uint256 lossValue, string source, bool triggered);
 
+    // ── Modifier ───────────────────────────────────────────────────────────────
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(address _owner) {
-        owner = _owner;
+    // ── Constructor ────────────────────────────────────────────────────────────
+
+    /// @param _owner     Address authorised to report and override trigger state.
+    /// @param _lossLimit Loss threshold in whole USD. Must be > 0.
+    /// @param _dealType  0 = IndustryLoss (insured losses), 1 = EconomicLoss (total).
+    constructor(address _owner, uint256 _lossLimit, uint8 _dealType) {
+        if (_lossLimit == 0) revert ZeroLossLimit();
+        owner     = _owner;
+        lossLimit = _lossLimit;
+        dealType  = _dealType;
     }
 
-    /// @notice Manually set the trigger state. Used for testing and manual event confirmation.
+    // ── External functions ─────────────────────────────────────────────────────
+
+    /// @notice Submit a confirmed loss figure from an authoritative source.
+    ///         If lossValue >= lossLimit the trigger fires permanently.
+    ///         Only the owner (company wallet) may call this.
+    function report(uint256 lossValue, string calldata source) external onlyOwner {
+        reportedValue  = lossValue;
+        reportedSource = source;
+        if (lossValue >= lossLimit && !_triggered) {
+            _triggered = true;
+        }
+        emit TriggerReported(lossValue, source, _triggered);
+    }
+
+    /// @notice Manually override the trigger state.
+    ///         Use report() as the primary path; this exists for corrections.
     function setTriggered(bool value) external onlyOwner {
         _triggered = value;
         emit TriggerSet(value);
