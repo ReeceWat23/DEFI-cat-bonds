@@ -661,6 +661,75 @@ contract CatBondTest is Test {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Guard: trigger must not have fired before subscription closes
+// ─────────────────────────────────────────────────────────────────────────────
+contract EarlyTriggerGuardTest is Test {
+
+    address sponsor       = address(0xA1);
+    address companyWallet = address(0xA2);
+    address investor1     = address(0xB1);
+
+    function test_CloseSubscription_RevertsIfTriggerAlreadyFired() public {
+        MockUSDC usdc = new MockUSDC();
+        // lossLimit=1 so any report fires immediately
+        TestTrigger trig = new TestTrigger(companyWallet);
+
+        CatBond bond = new CatBond(
+            sponsor, companyWallet, address(trig), address(usdc),
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days
+        );
+
+        // Fund + deposit so subscription can close
+        uint256 budget = bond.requiredCouponBudget();
+        usdc.mint(sponsor, budget + budget * 50 / 10_000);
+        vm.prank(sponsor); usdc.approve(address(bond), budget + budget * 50 / 10_000);
+        vm.prank(sponsor); bond.fundCouponBudget();
+
+        usdc.mint(investor1, 50_000e6 + 50_000e6 * 50 / 10_000);
+        vm.prank(investor1); usdc.approve(address(bond), 50_000e6 + 50_000e6 * 50 / 10_000);
+        vm.prank(investor1); bond.deposit(50_000e6, 50_000e6);
+
+        // Fire trigger DURING subscription (before closeSubscription)
+        vm.prank(companyWallet); trig.setTriggered(true);
+        assertTrue(trig.isTriggered(), "trigger should be fired");
+        assertEq(uint(bond.status()), uint(CatBond.Status.Subscription), "bond still in Subscription");
+
+        // closeSubscription must revert because trigger is already fired
+        vm.warp(block.timestamp + 7 days + 1);
+        vm.expectRevert(CatBond.TriggerAlreadyFired.selector);
+        bond.closeSubscription();
+    }
+
+    function test_CloseSubscription_SucceedsAfterTriggerReset() public {
+        MockUSDC usdc = new MockUSDC();
+        TestTrigger trig = new TestTrigger(companyWallet);
+
+        CatBond bond = new CatBond(
+            sponsor, companyWallet, address(trig), address(usdc),
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days
+        );
+
+        uint256 budget = bond.requiredCouponBudget();
+        usdc.mint(sponsor, budget + budget * 50 / 10_000);
+        vm.prank(sponsor); usdc.approve(address(bond), budget + budget * 50 / 10_000);
+        vm.prank(sponsor); bond.fundCouponBudget();
+
+        usdc.mint(investor1, 50_000e6 + 50_000e6 * 50 / 10_000);
+        vm.prank(investor1); usdc.approve(address(bond), 50_000e6 + 50_000e6 * 50 / 10_000);
+        vm.prank(investor1); bond.deposit(50_000e6, 50_000e6);
+
+        // Fire then reset trigger before subscription closes
+        vm.prank(companyWallet); trig.setTriggered(true);
+        vm.prank(companyWallet); trig.setTriggered(false);
+
+        // Now closeSubscription should succeed
+        vm.warp(block.timestamp + 7 days + 1);
+        bond.closeSubscription();
+        assertEq(uint(bond.status()), uint(CatBond.Status.Active), "bond must be Active after reset+close");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Trigger report() tests
 // Covers: ZeroLossLimit guard, threshold-based auto-fire, below-threshold no-fire,
 //         state updates on each report, and end-to-end settle after report fires.

@@ -694,60 +694,71 @@ function ManageSection() {
           danger
         />
 
-        {/* Report Loss (primary trigger path) */}
+        {/* Report Loss (primary trigger path) — only active when bond is Active */}
         <div className="bg-gray-700/60 rounded-xl border border-gray-600 p-4 sm:col-span-2">
           <div className="font-medium text-sm mb-1">Report Loss Event</div>
-          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
-            Company wallet only. Submit a confirmed loss figure and its source.
-            If the value meets or exceeds the trigger threshold the bond fires automatically.
-            {triggerLossLimit != null && (
-              <span className="text-gray-300">
-                {' '}Threshold: <strong>{formatUSDWhole(triggerLossLimit)}</strong> ({DEAL_TYPE_LABEL[Number(triggerDealType)]}).
-              </span>
-            )}
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Loss Value ($B)</label>
-              <input
-                type="number"
-                step="0.1"
-                value={reportLossB}
-                onChange={e => setReportLossB(e.target.value)}
-                placeholder="e.g. 142"
-                className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="text-xs text-gray-500 mt-0.5">Total in billions of USD</p>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-xs text-gray-400 mb-1">Source</label>
-              <input
-                type="text"
-                value={reportSource}
-                onChange={e => setReportSource(e.target.value)}
-                placeholder="e.g. Gallagher Re H1 2026"
-                className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              const lossB = parseFloat(reportLossB)
-              if (isNaN(lossB) || lossB <= 0) return alert('Enter a loss value in billions')
-              if (!reportSource.trim()) return alert('Enter a source (e.g. Gallagher Re H1 2026)')
-              const lossUSD = BigInt(Math.round(lossB * 1e9))
-              writeContract({
-                address: triggerAddress,
-                abi: TRIGGER_ABI,
-                functionName: 'report',
-                args: [lossUSD, reportSource.trim()],
-              })
-            }}
-            disabled={isBusy || !isConnected || !validTrigger || triggerFired === true}
-            className="w-full py-2 rounded-lg text-sm font-semibold bg-orange-700 hover:bg-orange-600 text-white disabled:opacity-40 transition-colors"
-          >
-            {triggerFired ? 'Trigger already fired' : 'Submit Report'}
-          </button>
+
+          {statusNum !== 2 ? (
+            <p className="text-xs text-yellow-400 leading-relaxed">
+              Reporting is only available once the bond is <strong>Active</strong>.
+              {statusNum === 1 && ' Close the subscription window first.'}
+              {statusNum === 0 && ' Sponsor must fund the coupon budget first.'}
+            </p>
+          ) : (
+            <>
+              <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+                Company wallet only. Submit a confirmed loss figure and its source.
+                If the value meets or exceeds the trigger threshold the bond fires automatically.
+                {triggerLossLimit != null && (
+                  <span className="text-gray-300">
+                    {' '}Threshold: <strong>{formatUSDWhole(triggerLossLimit)}</strong> ({DEAL_TYPE_LABEL[Number(triggerDealType)]}).
+                  </span>
+                )}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Loss Value ($B)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={reportLossB}
+                    onChange={e => setReportLossB(e.target.value)}
+                    placeholder="e.g. 142"
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Total in billions of USD</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-gray-400 mb-1">Source</label>
+                  <input
+                    type="text"
+                    value={reportSource}
+                    onChange={e => setReportSource(e.target.value)}
+                    placeholder="e.g. Gallagher Re H1 2026"
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  const lossB = parseFloat(reportLossB)
+                  if (isNaN(lossB) || lossB <= 0) return alert('Enter a loss value in billions')
+                  if (!reportSource.trim()) return alert('Enter a source (e.g. Gallagher Re H1 2026)')
+                  const lossUSD = BigInt(Math.round(lossB * 1e9))
+                  writeContract({
+                    address: triggerAddress,
+                    abi: TRIGGER_ABI,
+                    functionName: 'report',
+                    args: [lossUSD, reportSource.trim()],
+                  })
+                }}
+                disabled={isBusy || !isConnected || !validTrigger || triggerFired === true}
+                className="w-full py-2 rounded-lg text-sm font-semibold bg-orange-700 hover:bg-orange-600 text-white disabled:opacity-40 transition-colors"
+              >
+                {triggerFired ? 'Trigger already fired' : 'Submit Report'}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Reset Trigger (override / correction) */}

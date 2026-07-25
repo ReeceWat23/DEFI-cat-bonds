@@ -244,6 +244,7 @@ contract CatBond is ReentrancyGuard {
     {
         bool fullySubscribed = totalDeposited >= coverageAmount;
         if (_now() < subscriptionEnd && !fullySubscribed) revert SubscriptionStillOpen();
+        if (trigger.isTriggered()) revert TriggerAlreadyFired();
 
         activeStart = _now();
         maturity    = _now() + termDuration;
