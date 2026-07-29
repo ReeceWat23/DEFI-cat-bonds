@@ -17,7 +17,7 @@ if [ -f "$ENV_FILE" ]; then
   export $(grep -v '^#' "$ENV_FILE" | xargs)
 fi
 
-API_URL="https://realestatesimplified.xyz/RHODEX-NATCAT-LOSS"
+API_URL="https://realestatesimplified.xyz/version-test/api/1.1/wf/RHODEX-NATCAT-LOSS"
 API_KEY="${RHODEX_API_KEY:-}"
 
 if [ -z "$API_KEY" ]; then
@@ -29,8 +29,8 @@ FAIL=0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-ok()   { echo "  [PASS] $*"; ((PASS++)); }
-fail() { echo "  [FAIL] $*"; ((FAIL++)); }
+ok()   { echo "  [PASS] $*"; PASS=$((PASS+1)); }
+fail() { echo "  [FAIL] $*"; FAIL=$((FAIL+1)); }
 
 post() {
     # post <description> <json-body>
@@ -62,8 +62,14 @@ post() {
 
 check_field() {
     # check_field <field-name>
+    # Looks in both the top-level response and inside response.response (Bubble nesting)
     local field="$1"
-    if python3 -c "import json,sys; d=json.load(open('/tmp/rhodex_resp.json')); assert '$field' in d, '$field missing'" 2>/dev/null; then
+    if python3 -c "
+import json
+d = json.load(open('/tmp/rhodex_resp.json'))
+inner = d.get('response', d)
+assert '$field' in d or '$field' in inner, '$field missing'
+" 2>/dev/null; then
         ok "Response contains '$field'"
     else
         fail "Response missing '$field'"
