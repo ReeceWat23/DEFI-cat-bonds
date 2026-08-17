@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, useState } from 'react'
 import { themes, DEFAULT_THEME } from './tokens'
 
 const STORAGE_KEY = 'rhodex-theme'
@@ -19,7 +19,10 @@ export function ThemeProvider({ children }) {
     return window.localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME
   })
 
-  useEffect(() => {
+  // Layout effect (not a plain effect) so the --rhodex-* vars land on
+  // :root before the browser paints the first frame — an ordinary effect
+  // runs after paint and produces a visible flash of unstyled content.
+  useLayoutEffect(() => {
     applyTheme(themeId)
     window.localStorage.setItem(STORAGE_KEY, themeId)
   }, [themeId])

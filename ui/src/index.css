@@ -7,3 +7,12 @@
     font-family: var(--rhodex-font, 'IBM Plex Mono', monospace);
   }
 }
+
+@keyframes bar-grow {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+.animate-bar-grow {
+  animation: bar-grow 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

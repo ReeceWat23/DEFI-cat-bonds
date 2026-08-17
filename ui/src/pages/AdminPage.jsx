@@ -802,7 +802,7 @@ export default function AdminPage() {
       <header className="border-b border-gray-700">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-5">
-            <Link to="/" className="text-sm text-gray-400 hover:text-white transition-colors">
+            <Link to="/deal" className="text-sm text-gray-400 hover:text-white transition-colors">
               ← Deal Page
             </Link>
             <h1 className="text-lg font-bold">Admin</h1>

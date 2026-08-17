@@ -10,8 +10,12 @@ import { CATBOND_ABI, ERC20_ABI } from '../constants/abis'
 import { BrutalButton, BrutalCard, BrutalTag } from '../theme/primitives'
 import {
   formatUSDC, safeParseUSDC, formatDate, formatBps,
-  statusLabel, statusColor,
+  statusLabel,
 } from '../lib/utils'
+
+// Text-only color per bond status, for the ghost status badge (no flat
+// fill — just current-color text/border over the translucent white).
+const STATUS_TEXT_COLOR = ['#374151', '#1e40af', '#166534', '#6b21a8', '#991b1b']
 
 // ── Static deal content (DEAL 000 — Raydion) ─────────────────────────────────
 
@@ -151,14 +155,18 @@ function HistoricalChart() {
           style={{ bottom: `${thresholdPct}%` }}
         />
         <div className="absolute inset-0 flex items-end gap-1">
-          {HISTORICAL.map(d => {
+          {HISTORICAL.map((d, i) => {
             const heightPct = (d.total / maxVal) * 100
             const isHigh    = d.total >= threshold
             return (
               <div key={d.year} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                 <div
-                  className={`w-full transition-colors ${isHigh ? 'bg-red-400' : 'bg-[var(--rhodex-accent)] group-hover:brightness-110'}`}
-                  style={{ height: `${heightPct}%` }}
+                  className="w-full origin-bottom rounded-t-md transition-[filter] duration-200 group-hover:brightness-110 animate-bar-grow"
+                  style={{
+                    height: `${heightPct}%`,
+                    backgroundColor: isHigh ? 'rgba(248,113,113,0.55)' : 'rgba(47,83,148,0.55)',
+                    animationDelay: `${i * 35}ms`,
+                  }}
                 />
                 <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
                   {d.year}: ${d.total}B
@@ -169,8 +177,12 @@ function HistoricalChart() {
           {/* H1 2026 partial */}
           <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
             <div
-              className="w-full bg-blue-200 border-t-2 border-dashed border-blue-400"
-              style={{ height: `${(H1_TOTAL_B / maxVal) * 100}%` }}
+              className="w-full origin-bottom rounded-t-md border-t-2 border-dashed border-blue-400 animate-bar-grow"
+              style={{
+                height: `${(H1_TOTAL_B / maxVal) * 100}%`,
+                backgroundColor: 'rgba(191,219,254,0.55)',
+                animationDelay: `${HISTORICAL.length * 35}ms`,
+              }}
             />
             <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
               H1 2026: ${H1_TOTAL_B}B (partial)
@@ -193,22 +205,36 @@ function HistoricalChart() {
 
 function ExposureMap() {
   return (
-    <div className="space-y-3">
-      {EXPOSURE.map(e => (
-        <div key={e.region}>
-          <div className="flex justify-between text-xs mb-1">
+    <div>
+      {/* Proportional area chart — each block's width (and so its area,
+          since height is shared) matches its share of the portfolio. */}
+      <div className="flex w-full h-36 gap-0.5 overflow-hidden border border-[var(--rhodex-text-dark)]/20">
+        {EXPOSURE.map(e => (
+          <div
+            key={e.region}
+            title={`${e.region}: ${e.pct}%`}
+            className="relative flex flex-col justify-end overflow-hidden p-2"
+            style={{ width: `${e.pct}%`, backgroundColor: e.color }}
+          >
+            {e.pct >= 10 && (
+              <>
+                <span className="text-xs font-semibold leading-tight text-white">{e.region}</span>
+                <span className="text-[11px] text-white/85">{e.pct}%</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+        {EXPOSURE.map(e => (
+          <div key={e.region} className="flex items-center gap-1.5 text-xs">
+            <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ backgroundColor: e.color }} />
             <span className="text-[var(--rhodex-text-dark)] font-medium">{e.region}</span>
             <span className="text-[var(--rhodex-text-dark-muted)]">{e.pct}%</span>
           </div>
-          <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2">
-            <div
-              className="h-full"
-              style={{ width: `${e.pct}%`, backgroundColor: e.color }}
-            />
-          </div>
-        </div>
-      ))}
-      <p className="text-xs text-[var(--rhodex-text-dark-muted)] pt-1">Anonymized portfolio · Gross written premium basis</p>
+        ))}
+      </div>
+      <p className="text-xs text-[var(--rhodex-text-dark-muted)] pt-3">Anonymized portfolio · Gross written premium basis</p>
     </div>
   )
 }
@@ -544,22 +570,24 @@ export default function DealPage() {
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-5">
 
-        {/* Load bond */}
-        <BrutalCard className="p-5">
-          <div className="flex gap-3">
+        {/* Load bond — thin ghost bar, width pinned to column 1 via the same
+            grid the content below uses (a fixed max-width drifts out of
+            sync with column 1's actual fluid width at narrower viewports). */}
+        <div className="grid lg:grid-cols-3 gap-5">
+          <BrutalCard rounded="rounded-[10px]" className="lg:col-span-2 flex items-center gap-3 px-4 py-2">
             <input
               type="text"
               value={bondInput}
               onChange={e => setBondInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && loadBond()}
               placeholder="Paste CatBond contract address to load deal…"
-              className={`flex-1 px-4 py-2.5 font-mono text-sm ${INPUT_CLASS}`}
+              className="flex-1 min-w-0 bg-transparent font-mono text-sm text-[var(--rhodex-text-dark)] placeholder:text-[var(--rhodex-text-dark-muted)] outline-none"
             />
-            <BrutalButton onClick={loadBond}>
+            <BrutalButton size="px-3 py-1.5 text-xs" onClick={loadBond}>
               Load
             </BrutalButton>
-          </div>
-        </BrutalCard>
+          </BrutalCard>
+        </div>
 
         {/* Tx banner — spans full width */}
         {bondAddress && <TxBanner isWriting={isWriting} isConfirming={isConfirming} isConfirmed={isConfirmed} hash={txHash} error={writeError} />}
@@ -570,53 +598,68 @@ export default function DealPage() {
             {/* ── LEFT COLUMN (2/3) ────────────────────────────────────── */}
             <div className="lg:col-span-2 space-y-5">
 
-              {/* Deal hero */}
-              <BrutalCard className="p-6">
-                <div className="flex items-start justify-between gap-4 mb-4">
+              {/* ── Section 1: deal hero (funding overview) + historical chart ──
+                  60% white fill (vs. the 45% default) so the border pops
+                  a bit more against the page gradient. */}
+              <BrutalCard rounded="rounded-[12px]" className="p-6" style={{ backgroundColor: 'rgba(255,255,255,0.6)' }}>
+                <div className="flex items-start justify-between gap-4 mb-6">
                   <div>
                     <p className="text-xs font-medium text-[var(--rhodex-text-dark-muted)] uppercase tracking-wide mb-1">
                       Sponsor · {SPONSOR.name}, {SPONSOR.hq}
                     </p>
-                    <h2 className="text-xl font-bold text-[var(--rhodex-text-dark)]">Global Natural Catastrophe Loss 2026</h2>
-                    <p className="text-sm text-[var(--rhodex-text-dark-muted)] mt-1 leading-relaxed">
-                      Fires if global total economic natural catastrophe losses exceed{' '}
-                      <strong>${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026,
-                      as confirmed by the Gallagher Re Annual Report.
-                    </p>
+                    <h2 className="text-xl font-bold text-[var(--rhodex-text-dark)] mb-3">Global Natural Catastrophe Loss 2026</h2>
+
+                    {/* Trigger condition, verified by the data-source oracle */}
+                    <div className="flex items-center gap-6">
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wide text-[var(--rhodex-text-dark-muted)]">Verified by</span>
+                        <img
+                          src="/gallagher-re-logo.png"
+                          alt="Gallagher Re"
+                          className="h-4 w-auto"
+                          onError={e => { e.currentTarget.style.display = 'none' }}
+                        />
+                      </div>
+                      <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed">
+                        If total economic natural catastrophe losses exceed{' '}
+                        <strong className="text-[var(--rhodex-text-dark)]">${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026, this deal triggers.
+                      </p>
+                    </div>
                   </div>
-                  <span className={`flex-shrink-0 border-2 border-current px-3 py-1 text-xs font-bold uppercase tracking-wide ${statusColor(status)}`}>
+                  <span className="flex-shrink-0 border border-current bg-white/70 px-3 py-1 text-xs font-bold uppercase tracking-wide" style={{ color: STATUS_TEXT_COLOR[Number(status ?? 0)] ?? STATUS_TEXT_COLOR[0] }}>
                     {statusLabel(status)}
                   </span>
                 </div>
 
                 {/* Fill bar */}
-                <div className="mb-5">
+                <div className="mb-6">
                   <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mb-1.5">
                     <span>Principal subscribed</span>
                     <span>{pctFilled}% · {formatUSDC(totalDeposited)} of {formatUSDC(coverageAmount)}</span>
                   </div>
-                  <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2">
+                  <div className="w-full border border-[var(--rhodex-text-dark)]/20 h-2">
                     <div className="bg-[var(--rhodex-accent)] h-full transition-all" style={{ width: `${pctFilled}%` }} />
                   </div>
                 </div>
 
-                {/* Key stats */}
-                <div className="grid grid-cols-4 gap-4 pt-4 border-t-2 border-[var(--rhodex-text-dark)]/10">
+                {/* Key stats — ghost box, higher opacity than the parent card */}
+                <div className="grid grid-cols-4 gap-4 rounded-[10px] border border-white/80 bg-white/60 p-4">
                   <StatChip label="Coverage"   value={formatUSDC(coverageAmount)} />
                   <StatChip label="Coupon"     value={formatBps(couponRateBps)} />
                   <StatChip label="Term"       value={termDays ? `${termDays} days` : '—'} />
                   <StatChip label="Min invest" value={formatUSDC(minInvestment)} />
                 </div>
+
+                <div className="mt-[80px]">
+                  <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Historical Insured Losses vs Trigger</h3>
+                  <HistoricalChart />
+                </div>
               </BrutalCard>
 
-              {/* Historical chart */}
-              <BrutalCard className="p-6">
-                <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Historical Insured Losses vs Trigger</h3>
-                <HistoricalChart />
-              </BrutalCard>
-
-              {/* Investment layer / action card */}
-              <BrutalCard className="p-6">
+              {/* ── Section 2: Investment layer / action card ───────────────
+                  Internal look stays as-is for now — an "options set" style
+                  pass is planned separately. */}
+              <BrutalCard rounded="rounded-[12px]" className="p-6">
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="font-semibold text-[var(--rhodex-text-dark)]">Investment Layer</h3>
                   <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Layer 1 of 1</span>
@@ -741,31 +784,9 @@ export default function DealPage() {
                 )}
               </BrutalCard>
 
-              {/* Deal disclosure strip */}
-              <div
-                className="rounded-none border-2 border-[var(--rhodex-text-dark)] shadow-[4px_4px_0_0_var(--rhodex-text-dark)] p-5 text-white"
-                style={{ background: 'var(--rhodex-card-footer-bg)' }}
-              >
-                <h3 className="text-xs font-semibold mb-4 text-white/50 tracking-widest uppercase">
-                  Deal Disclosure
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  {[
-                    { label: 'Coverage', value: formatUSDC(coverageAmount) },
-                    { label: 'Layers',   value: '1' },
-                    { label: 'Coupon',   value: formatBps(couponRateBps) },
-                    { label: 'Term',     value: termDays ? `${termDays}d` : '—' },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <div className="text-xs text-white/50 mb-0.5">{label}</div>
-                      <div className="font-bold text-lg text-white">{value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Sponsor summary */}
-              <BrutalCard className="p-6">
+              {/* ── Section 3: seller info + exposure + deal details ────────
+                  Company-specific info first, then exposure, then details. */}
+              <BrutalCard rounded="rounded-[12px]" className="p-6">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 border-2 border-[var(--rhodex-text-dark)] bg-[var(--rhodex-accent)] flex items-center justify-center text-white font-bold text-lg">R</div>
                   <div>
@@ -782,12 +803,11 @@ export default function DealPage() {
                 >
                   ↓ Statement of Values (SOV)
                 </BrutalButton>
-              </BrutalCard>
 
-              {/* Exposure map */}
-              <BrutalCard className="p-6">
-                <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Portfolio Exposure</h3>
-                <ExposureMap />
+                <div className="mt-6 pt-6 border-t-2 border-[var(--rhodex-text-dark)]/10">
+                  <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Portfolio Exposure</h3>
+                  <ExposureMap />
+                </div>
               </BrutalCard>
 
             </div>

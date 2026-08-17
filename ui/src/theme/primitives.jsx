@@ -43,9 +43,12 @@ export function BrutalButton({
 // Card surface: same glass treatment as the ghost button — thin white
 // border, white fill at 45% opacity — so containers read as part of the
 // lapis background rather than opaque white boxes sitting on top of it.
-export function BrutalCard({ as: Comp = 'div', className = '', children, ...props }) {
+// `rounded` defaults to square (the brutalist default) but individual
+// call sites can pass a softer radius without fighting Tailwind's
+// same-property class-order ambiguity.
+export function BrutalCard({ as: Comp = 'div', rounded = 'rounded-none', className = '', children, ...props }) {
   return (
-    <Comp className={`rounded-none border border-[var(--rhodex-border-white)] bg-[var(--rhodex-ghost-fill)] ${className}`} {...props}>
+    <Comp className={`${rounded} border border-[var(--rhodex-border-white)] bg-[var(--rhodex-ghost-fill)] ${className}`} {...props}>
       {children}
     </Comp>
   )
