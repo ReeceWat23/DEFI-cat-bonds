@@ -4,6 +4,6 @@
 
 @layer base {
   body {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--rhodex-font, 'IBM Plex Mono', monospace);
   }
 }

@@ -7,6 +7,7 @@ import { injected } from 'wagmi/connectors'
 import { Link } from 'react-router-dom'
 import { isAddress } from 'viem'
 import { CATBOND_ABI, ERC20_ABI } from '../constants/abis'
+import { BrutalButton, BrutalCard, BrutalTag } from '../theme/primitives'
 import {
   formatUSDC, safeParseUSDC, formatDate, formatBps,
   statusLabel, statusColor,
@@ -101,36 +102,33 @@ function ConnectButton() {
   const { disconnect } = useDisconnect()
   if (isConnected) return (
     <div className="flex items-center gap-3">
-      <span className="text-sm font-mono text-gray-500">{address?.slice(0,6)}...{address?.slice(-4)}</span>
-      <button onClick={() => disconnect()} className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100">
+      <span className="text-sm font-mono text-[var(--rhodex-text-dark-muted)]">{address?.slice(0,6)}...{address?.slice(-4)}</span>
+      <BrutalButton tone="ghost" size="px-3 py-1.5 text-xs" onClick={() => disconnect()}>
         Disconnect
-      </button>
+      </BrutalButton>
     </div>
   )
   return (
-    <button
-      onClick={() => connect({ connector: injected() })}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-    >
+    <BrutalButton size="px-4 py-2 text-sm" onClick={() => connect({ connector: injected() })}>
       Connect Wallet
-    </button>
+    </BrutalButton>
   )
 }
 
 function StatChip({ label, value }) {
   return (
     <div className="text-center">
-      <div className="text-lg font-bold text-gray-900">{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+      <div className="text-lg font-bold text-[var(--rhodex-text-dark)]">{value}</div>
+      <div className="text-xs text-[var(--rhodex-text-dark-muted)] mt-0.5">{label}</div>
     </div>
   )
 }
 
 function TxBanner({ isWriting, isConfirming, isConfirmed, hash, error }) {
-  if (error)       return <div className="rounded-lg p-3 text-sm bg-red-50 border border-red-200 text-red-700"><strong>Error:</strong> {parseError(error)}</div>
-  if (isWriting)   return <div className="rounded-lg p-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-800">Waiting for wallet confirmation…</div>
-  if (isConfirming) return <div className="rounded-lg p-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-800">Confirming on-chain — <span className="font-mono">{hash?.slice(0,12)}…</span></div>
-  if (isConfirmed)  return <div className="rounded-lg p-3 text-sm bg-green-50 border border-green-200 text-green-700">Transaction confirmed! <span className="font-mono text-xs">{hash?.slice(0,14)}…</span></div>
+  if (error)       return <div className="rounded-none border-2 border-red-300 bg-red-50 p-3 text-sm text-red-700"><strong>Error:</strong> {parseError(error)}</div>
+  if (isWriting)   return <div className="rounded-none border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">Waiting for wallet confirmation…</div>
+  if (isConfirming) return <div className="rounded-none border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">Confirming on-chain — <span className="font-mono">{hash?.slice(0,12)}…</span></div>
+  if (isConfirmed)  return <div className="rounded-none border-2 border-green-300 bg-green-50 p-3 text-sm text-green-700">Transaction confirmed! <span className="font-mono text-xs">{hash?.slice(0,14)}…</span></div>
   return null
 }
 
@@ -144,7 +142,7 @@ function HistoricalChart() {
   return (
     <div>
       <div className="flex items-end justify-between mb-1">
-        <span className="text-xs text-gray-500">Annual total economic nat cat losses ($B)</span>
+        <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Annual total economic nat cat losses ($B)</span>
         <span className="text-xs text-red-500 font-medium">— ${threshold}B trigger</span>
       </div>
       <div className="relative" style={{ height: '120px' }}>
@@ -159,10 +157,10 @@ function HistoricalChart() {
             return (
               <div key={d.year} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                 <div
-                  className={`w-full rounded-t-sm transition-colors ${isHigh ? 'bg-red-400' : 'bg-blue-400 group-hover:bg-blue-500'}`}
+                  className={`w-full transition-colors ${isHigh ? 'bg-red-400' : 'bg-[var(--rhodex-accent)] group-hover:brightness-110'}`}
                   style={{ height: `${heightPct}%` }}
                 />
-                <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
+                <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
                   {d.year}: ${d.total}B
                 </div>
               </div>
@@ -171,10 +169,10 @@ function HistoricalChart() {
           {/* H1 2026 partial */}
           <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
             <div
-              className="w-full rounded-t-sm bg-blue-200 border-t-2 border-dashed border-blue-400"
+              className="w-full bg-blue-200 border-t-2 border-dashed border-blue-400"
               style={{ height: `${(H1_TOTAL_B / maxVal) * 100}%` }}
             />
-            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
+            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
               H1 2026: ${H1_TOTAL_B}B (partial)
             </div>
           </div>
@@ -182,11 +180,11 @@ function HistoricalChart() {
       </div>
       <div className="flex gap-1 mt-1">
         {HISTORICAL.map(d => (
-          <div key={d.year} className="flex-1 text-center text-xs text-gray-400">{String(d.year).slice(2)}</div>
+          <div key={d.year} className="flex-1 text-center text-xs text-[var(--rhodex-text-dark-muted)]">{String(d.year).slice(2)}</div>
         ))}
-        <div className="flex-1 text-center text-xs text-blue-400 font-medium">H1'26</div>
+        <div className="flex-1 text-center text-xs text-[var(--rhodex-accent)] font-medium">H1'26</div>
       </div>
-      <div className="mt-2 text-xs text-gray-400">Source: Gallagher Re · Swiss Re sigma</div>
+      <div className="mt-2 text-xs text-[var(--rhodex-text-dark-muted)]">Source: Gallagher Re · Swiss Re sigma</div>
     </div>
   )
 }
@@ -199,18 +197,18 @@ function ExposureMap() {
       {EXPOSURE.map(e => (
         <div key={e.region}>
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-gray-700 font-medium">{e.region}</span>
-            <span className="text-gray-500">{e.pct}%</span>
+            <span className="text-[var(--rhodex-text-dark)] font-medium">{e.region}</span>
+            <span className="text-[var(--rhodex-text-dark-muted)]">{e.pct}%</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2">
+          <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2">
             <div
-              className="h-2 rounded-full"
+              className="h-full"
               style={{ width: `${e.pct}%`, backgroundColor: e.color }}
             />
           </div>
         </div>
       ))}
-      <p className="text-xs text-gray-400 pt-1">Anonymized portfolio · Gross written premium basis</p>
+      <p className="text-xs text-[var(--rhodex-text-dark-muted)] pt-1">Anonymized portfolio · Gross written premium basis</p>
     </div>
   )
 }
@@ -222,68 +220,68 @@ function TriggerWidget({ bondStatus }) {
   const pct       = Math.min(100, Math.round((H1_TOTAL_B / TRIGGER_THRESHOLD_B) * 100))
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+    <BrutalCard className="p-5">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-semibold text-gray-900">Trigger Status</span>
+        <span className="text-sm font-semibold text-[var(--rhodex-text-dark)]">Trigger Status</span>
         {triggered ? (
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> TRIGGERED
-          </span>
+          <BrutalTag className="border-red-600 text-red-700 bg-red-50">
+            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Triggered
+          </BrutalTag>
         ) : (
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> SAFE
-          </span>
+          <BrutalTag className="border-green-600 text-green-700 bg-green-50">
+            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Safe
+          </BrutalTag>
         )}
       </div>
 
-      <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+      <p className="text-xs text-[var(--rhodex-text-dark-muted)] mb-3 leading-relaxed">
         Total economic nat cat losses ≥ <strong>${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026, per Gallagher Re Annual Report.
       </p>
 
       <div className="mb-3">
-        <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mb-1">
           <span>${H1_TOTAL_B}B confirmed (H1 2026)</span>
           <span>{pct}% of threshold</span>
         </div>
-        <div className="w-full bg-gray-100 rounded-full h-2.5 rounded-full">
+        <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2.5">
           <div
-            className="h-2.5 rounded-full transition-all bg-blue-500"
+            className="h-2.5 transition-all bg-[var(--rhodex-accent)]"
             style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-gray-400 mt-1">
+        <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
           <span>$0</span>
           <span>${TRIGGER_THRESHOLD_B}B</span>
         </div>
       </div>
 
-      <div className="border-t border-gray-100 pt-3 space-y-1.5">
+      <div className="border-t-2 border-[var(--rhodex-text-dark)]/10 pt-3 space-y-1.5">
         <div className="flex justify-between text-xs">
-          <span className="text-gray-500">Total economic losses H1</span>
-          <span className="font-semibold text-gray-800">${H1_TOTAL_B}B</span>
+          <span className="text-[var(--rhodex-text-dark-muted)]">Total economic losses H1</span>
+          <span className="font-semibold text-[var(--rhodex-text-dark)]">${H1_TOTAL_B}B</span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-gray-500">Insured losses H1 (ref.)</span>
-          <span className="font-medium text-gray-500">${H1_INSURED_B}B</span>
+          <span className="text-[var(--rhodex-text-dark-muted)]">Insured losses H1 (ref.)</span>
+          <span className="font-medium text-[var(--rhodex-text-dark-muted)]">${H1_INSURED_B}B</span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-gray-500">Remaining to trigger</span>
-          <span className="font-semibold text-gray-800">${TRIGGER_THRESHOLD_B - H1_TOTAL_B}B</span>
+          <span className="text-[var(--rhodex-text-dark-muted)]">Remaining to trigger</span>
+          <span className="font-semibold text-[var(--rhodex-text-dark)]">${TRIGGER_THRESHOLD_B - H1_TOTAL_B}B</span>
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
-        <div className="w-5 h-5 rounded bg-orange-50 border border-orange-200 flex items-center justify-center text-xs font-bold text-orange-600">G</div>
+      <div className="mt-3 pt-3 border-t-2 border-[var(--rhodex-text-dark)]/10 flex items-center gap-2">
+        <div className="w-5 h-5 border-2 border-orange-300 bg-orange-50 flex items-center justify-center text-xs font-bold text-orange-600">G</div>
         <a
           href="https://www.ajg.com/gallagherre/news-and-insights/natural-catastrophe-and-climate-report-h1-2026/"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs text-blue-600 hover:underline"
+          className="text-xs text-[var(--rhodex-accent)] hover:underline"
         >
           Gallagher Re H1 2026 Report ›
         </a>
       </div>
-    </div>
+    </BrutalCard>
   )
 }
 
@@ -321,44 +319,43 @@ function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, token
   return (
     <div className="space-y-3 mt-4">
       {validationError && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{validationError}</div>
+        <div className="text-xs text-red-600 bg-red-50 border-2 border-red-200 p-2">{validationError}</div>
       )}
       {writeError && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{parseError(writeError)}</div>
+        <div className="text-xs text-red-600 bg-red-50 border-2 border-red-200 p-2">{parseError(writeError)}</div>
       )}
       {!validationError && (
         <>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-blue-600'}`}>
+          <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)]">
+            <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
               {approveConfirmed ? '✓' : '①'} Approve
             </span>
-            <span className="text-gray-300">→</span>
-            <span className={`font-medium ${approveConfirmed ? 'text-blue-600' : 'text-gray-400'}`}>
+            <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
+            <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
               ② Deposit
             </span>
           </div>
           <div className="flex gap-3 items-center flex-wrap">
             {needsApprove && (
-              <button
+              <BrutalButton
+                tone="accent"
                 onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, depositTotal * 10n] }) }}
                 disabled={isBusy}
-                className="px-5 py-2.5 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors text-sm"
               >
                 {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
-              </button>
+              </BrutalButton>
             )}
             {approveConfirmed && (
-              <span className="text-xs text-green-600 font-medium bg-green-50 border border-green-200 px-2 py-1 rounded-lg">✓ Approved</span>
+              <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
             )}
-            <button
+            <BrutalButton
               onClick={() => { setFlow('depositing'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'deposit', args: [depositAmount, depositAmount] }) }}
               disabled={isBusy || needsApprove}
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm"
             >
               {flow === 'depositing' && isBusy ? 'Depositing…' : '② Deposit'}
-            </button>
+            </BrutalButton>
           </div>
-          {needsApprove && <p className="text-xs text-gray-400">Approve first, then Deposit will unlock.</p>}
+          {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)]">Approve first, then Deposit will unlock.</p>}
         </>
       )}
     </div>
@@ -386,42 +383,43 @@ function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeC
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
-        <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-blue-600'}`}>
+      <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)] mb-3">
+        <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
           {approveConfirmed ? '✓' : '①'} Approve token
         </span>
-        <span className="text-gray-300">→</span>
-        <span className={`font-medium ${approveConfirmed ? 'text-blue-600' : 'text-gray-400'}`}>
+        <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
+        <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
           ② Fund Coupon Budget
         </span>
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         {needsApprove && (
-          <button
+          <BrutalButton
+            tone="accent"
             onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, budgetWithFee * 10n] }) }}
             disabled={isBusy}
-            className="px-5 py-2.5 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors text-sm"
           >
             {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
-          </button>
+          </BrutalButton>
         )}
         {approveConfirmed && (
-          <span className="text-xs text-green-600 font-medium bg-green-50 border border-green-200 px-2 py-1 rounded-lg">✓ Approved</span>
+          <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
         )}
-        <button
+        <BrutalButton
           onClick={() => { setFlow('funding'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'fundCouponBudget' }) }}
           disabled={isBusy || needsApprove}
-          className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm"
         >
           {flow === 'funding' && isBusy ? 'Funding…' : '② Fund Coupon Budget'}
-        </button>
+        </BrutalButton>
       </div>
-      {needsApprove && <p className="text-xs text-gray-400 mt-2">Approve first so the bond contract can pull the coupon budget.</p>}
+      {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-2">Approve first so the bond contract can pull the coupon budget.</p>}
     </div>
   )
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+
+const INPUT_CLASS = 'border-2 border-[var(--rhodex-text-dark)] bg-white rounded-none focus:outline-none focus:ring-2 focus:ring-[var(--rhodex-accent)]'
 
 export default function DealPage() {
   const { address, isConnected } = useAccount()
@@ -521,19 +519,24 @@ export default function DealPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen font-mono text-[var(--rhodex-text-dark)]">
+      {/* Fixed full-viewport gradient layer — keeps the gradient visually
+          consistent as the (much taller than one screen) deal page scrolls,
+          instead of the gradient stretching thin across the whole content
+          height and reading as flat near-white at the top. */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10" style={{ background: 'var(--rhodex-bg)' }} />
 
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <header className="sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            <h1 className="text-lg font-bold tracking-tight text-[var(--rhodex-text-dark)]">
               RHODEX.
             </h1>
-            <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded font-medium">Testnet</span>
+            <BrutalTag className="translate-y-[3px] border-orange-400 bg-transparent text-orange-600 shadow-[0_0_6px_1px_rgba(249,115,22,0.6)]">Testnet</BrutalTag>
           </div>
           <div className="flex items-center gap-5">
-            <Link to="/admin" className="text-sm text-gray-400 hover:text-gray-700 transition-colors">Admin ›</Link>
+            <Link to="/admin" className="text-sm text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] transition-colors">Admin ›</Link>
             <ConnectButton />
           </div>
         </div>
@@ -542,7 +545,7 @@ export default function DealPage() {
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-5">
 
         {/* Load bond */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+        <BrutalCard className="p-5">
           <div className="flex gap-3">
             <input
               type="text"
@@ -550,13 +553,13 @@ export default function DealPage() {
               onChange={e => setBondInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && loadBond()}
               placeholder="Paste CatBond contract address to load deal…"
-              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`flex-1 px-4 py-2.5 font-mono text-sm ${INPUT_CLASS}`}
             />
-            <button onClick={loadBond} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors text-sm">
+            <BrutalButton onClick={loadBond}>
               Load
-            </button>
+            </BrutalButton>
           </div>
-        </div>
+        </BrutalCard>
 
         {/* Tx banner — spans full width */}
         {bondAddress && <TxBanner isWriting={isWriting} isConfirming={isConfirming} isConfirmed={isConfirmed} hash={txHash} error={writeError} />}
@@ -568,70 +571,70 @@ export default function DealPage() {
             <div className="lg:col-span-2 space-y-5">
 
               {/* Deal hero */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <BrutalCard className="p-6">
                 <div className="flex items-start justify-between gap-4 mb-4">
                   <div>
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                    <p className="text-xs font-medium text-[var(--rhodex-text-dark-muted)] uppercase tracking-wide mb-1">
                       Sponsor · {SPONSOR.name}, {SPONSOR.hq}
                     </p>
-                    <h2 className="text-xl font-bold text-gray-900">Global Natural Catastrophe Loss 2026</h2>
-                    <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+                    <h2 className="text-xl font-bold text-[var(--rhodex-text-dark)]">Global Natural Catastrophe Loss 2026</h2>
+                    <p className="text-sm text-[var(--rhodex-text-dark-muted)] mt-1 leading-relaxed">
                       Fires if global total economic natural catastrophe losses exceed{' '}
                       <strong>${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026,
                       as confirmed by the Gallagher Re Annual Report.
                     </p>
                   </div>
-                  <span className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold ${statusColor(status)}`}>
+                  <span className={`flex-shrink-0 border-2 border-current px-3 py-1 text-xs font-bold uppercase tracking-wide ${statusColor(status)}`}>
                     {statusLabel(status)}
                   </span>
                 </div>
 
                 {/* Fill bar */}
                 <div className="mb-5">
-                  <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                  <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mb-1.5">
                     <span>Principal subscribed</span>
                     <span>{pctFilled}% · {formatUSDC(totalDeposited)} of {formatUSDC(coverageAmount)}</span>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-full h-2">
-                    <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${pctFilled}%` }} />
+                  <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2">
+                    <div className="bg-[var(--rhodex-accent)] h-full transition-all" style={{ width: `${pctFilled}%` }} />
                   </div>
                 </div>
 
                 {/* Key stats */}
-                <div className="grid grid-cols-4 gap-4 pt-4 border-t border-gray-100">
+                <div className="grid grid-cols-4 gap-4 pt-4 border-t-2 border-[var(--rhodex-text-dark)]/10">
                   <StatChip label="Coverage"   value={formatUSDC(coverageAmount)} />
                   <StatChip label="Coupon"     value={formatBps(couponRateBps)} />
                   <StatChip label="Term"       value={termDays ? `${termDays} days` : '—'} />
                   <StatChip label="Min invest" value={formatUSDC(minInvestment)} />
                 </div>
-              </div>
+              </BrutalCard>
 
               {/* Historical chart */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-                <h3 className="font-semibold text-gray-900 mb-4">Historical Insured Losses vs Trigger</h3>
+              <BrutalCard className="p-6">
+                <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Historical Insured Losses vs Trigger</h3>
                 <HistoricalChart />
-              </div>
+              </BrutalCard>
 
               {/* Investment layer / action card */}
-              <div className="bg-white rounded-2xl border-2 border-blue-100 p-6 shadow-sm">
+              <BrutalCard className="p-6">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-semibold text-gray-900">Investment Layer</h3>
-                  <span className="text-xs text-gray-400">Layer 1 of 1</span>
+                  <h3 className="font-semibold text-[var(--rhodex-text-dark)]">Investment Layer</h3>
+                  <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Layer 1 of 1</span>
                 </div>
-                <p className="text-xs text-gray-500 mb-5">
+                <p className="text-xs text-[var(--rhodex-text-dark-muted)] mb-5">
                   Insured losses ≥ ${TRIGGER_THRESHOLD_B}B · {formatUSDC(coverageAmount)} coverage · {formatBps(couponRateBps)} coupon · {termDays}-day term
                 </p>
 
                 {/* Phase 0: Funding */}
                 {statusNum === 0 && isSponsor && (
                   <div>
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-4">
                       Deposit the coupon budget to open the subscription window.
                     </p>
-                    <div className="grid grid-cols-3 gap-4 text-sm mb-5 p-3 bg-gray-50 rounded-xl">
-                      <div><div className="text-xs text-gray-500">Coupon budget</div><div className="font-semibold">{formatUSDC(requiredCouponBudget)}</div></div>
-                      <div><div className="text-xs text-gray-500">0.5% fee</div><div className="font-semibold">{formatUSDC(budgetWithFee > 0n ? budgetWithFee - requiredCouponBudget : 0n)}</div></div>
-                      <div><div className="text-xs text-gray-500 text-blue-700">You pay</div><div className="font-semibold text-blue-700">{formatUSDC(budgetWithFee)}</div></div>
+                    <div className="grid grid-cols-3 gap-4 text-sm mb-5 p-3 border-2 border-[var(--rhodex-text-dark)]/15 bg-black/5">
+                      <div><div className="text-xs text-[var(--rhodex-text-dark-muted)]">Coupon budget</div><div className="font-semibold">{formatUSDC(requiredCouponBudget)}</div></div>
+                      <div><div className="text-xs text-[var(--rhodex-text-dark-muted)]">0.5% fee</div><div className="font-semibold">{formatUSDC(budgetWithFee > 0n ? budgetWithFee - requiredCouponBudget : 0n)}</div></div>
+                      <div><div className="text-xs text-[var(--rhodex-accent)]">You pay</div><div className="font-semibold text-[var(--rhodex-accent)]">{formatUSDC(budgetWithFee)}</div></div>
                     </div>
                     <FundFlow
                       bondAddress={bondAddress}
@@ -646,7 +649,7 @@ export default function DealPage() {
                 )}
 
                 {statusNum === 0 && !isSponsor && (
-                  <div className="flex items-center gap-3 text-gray-500 text-sm">
+                  <div className="flex items-center gap-3 text-[var(--rhodex-text-dark-muted)] text-sm">
                     <span className="text-xl">⏳</span>
                     <span>Awaiting sponsor funding — subscription not yet open.</span>
                   </div>
@@ -657,20 +660,20 @@ export default function DealPage() {
                   <div>
                     {isConnected ? (
                       <>
-                        <div className="flex justify-between text-xs text-gray-500 mb-3">
+                        <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mb-3">
                           <span>Closes {subscriptionEnd ? formatDate(subscriptionEnd) : '—'}</span>
                           <span>Remaining: {formatUSDC(coverageAmount && totalDeposited ? coverageAmount - totalDeposited : 0n)}</span>
                         </div>
-                        <label className="block text-xs text-gray-500 mb-1">Amount (RDX)</label>
+                        <label className="block text-xs text-[var(--rhodex-text-dark-muted)] mb-1">Amount (RDX)</label>
                         <input
                           type="number"
                           value={depositInput}
                           onChange={e => setDepositInput(e.target.value)}
                           placeholder={`Min ${formatUSDC(minInvestment)}`}
-                          className="w-full sm:w-64 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className={`w-full sm:w-64 px-4 py-2.5 text-sm ${INPUT_CLASS}`}
                         />
                         {depositAmount > 0n && (
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
                             Total incl. 0.5% fee: <strong>{formatUSDC(depositTotal)}</strong>
                           </p>
                         )}
@@ -692,15 +695,11 @@ export default function DealPage() {
 
                         {/* Close subscription — anyone can call once full or expired */}
                         {(fullySubscribed || (subscriptionEnd && now >= subscriptionEnd)) && (
-                          <div className="mt-5 pt-5 border-t border-gray-100">
-                            <button
-                              onClick={() => write('closeSubscription')}
-                              disabled={isBusy}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-                            >
+                          <div className="mt-5 pt-5 border-t-2 border-[var(--rhodex-text-dark)]/10">
+                            <BrutalButton size="px-4 py-2 text-sm" onClick={() => write('closeSubscription')} disabled={isBusy}>
                               Close Subscription &amp; Activate Bond
-                            </button>
-                            <p className="text-xs text-gray-400 mt-1">
+                            </BrutalButton>
+                            <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
                               {fullySubscribed
                                 ? 'Coverage fully subscribed — no need to wait for the window to expire.'
                                 : 'Subscription window expired.'}
@@ -710,7 +709,7 @@ export default function DealPage() {
                       </>
                     ) : (
                       <div className="text-center py-4">
-                        <p className="text-sm text-gray-500 mb-3">Connect your wallet to invest in this bond.</p>
+                        <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-3">Connect your wallet to invest in this bond.</p>
                         <ConnectButton />
                       </div>
                     )}
@@ -719,7 +718,7 @@ export default function DealPage() {
 
                 {/* Phase 2: Active */}
                 {statusNum === 2 && (
-                  <div className="flex items-center gap-3 text-gray-600 text-sm">
+                  <div className="flex items-center gap-3 text-[var(--rhodex-text-dark-muted)] text-sm">
                     <span className="text-xl">🔒</span>
                     <span>Bond is active. Subscription closed {formatDate(subscriptionEnd)}.</span>
                   </div>
@@ -740,11 +739,14 @@ export default function DealPage() {
                     <span>Trigger fired. Principal transferred to sponsor at settlement.</span>
                   </div>
                 )}
-              </div>
+              </BrutalCard>
 
               {/* Deal disclosure strip */}
-              <div className="bg-gray-900 rounded-2xl p-5 text-white">
-                <h3 className="text-xs font-semibold mb-4 text-gray-500 tracking-widest uppercase">
+              <div
+                className="rounded-none border-2 border-[var(--rhodex-text-dark)] shadow-[4px_4px_0_0_var(--rhodex-text-dark)] p-5 text-white"
+                style={{ background: 'var(--rhodex-card-footer-bg)' }}
+              >
+                <h3 className="text-xs font-semibold mb-4 text-white/50 tracking-widest uppercase">
                   Deal Disclosure
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -755,7 +757,7 @@ export default function DealPage() {
                     { label: 'Term',     value: termDays ? `${termDays}d` : '—' },
                   ].map(({ label, value }) => (
                     <div key={label}>
-                      <div className="text-xs text-gray-500 mb-0.5">{label}</div>
+                      <div className="text-xs text-white/50 mb-0.5">{label}</div>
                       <div className="font-bold text-lg text-white">{value}</div>
                     </div>
                   ))}
@@ -763,29 +765,30 @@ export default function DealPage() {
               </div>
 
               {/* Sponsor summary */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <BrutalCard className="p-6">
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-lg">R</div>
+                  <div className="w-10 h-10 border-2 border-[var(--rhodex-text-dark)] bg-[var(--rhodex-accent)] flex items-center justify-center text-white font-bold text-lg">R</div>
                   <div>
-                    <div className="font-semibold text-gray-900">{SPONSOR.name}</div>
-                    <div className="text-xs text-gray-500">{SPONSOR.hq} · Specialty Reinsurer</div>
+                    <div className="font-semibold text-[var(--rhodex-text-dark)]">{SPONSOR.name}</div>
+                    <div className="text-xs text-[var(--rhodex-text-dark-muted)]">{SPONSOR.hq} · Specialty Reinsurer</div>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 leading-relaxed mb-4">{SPONSOR.description}</p>
-                <button
+                <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4">{SPONSOR.description}</p>
+                <BrutalButton
+                  tone="ghost"
+                  size="px-4 py-2 text-sm"
                   disabled
-                  className="text-sm px-4 py-2 border border-gray-200 rounded-xl text-gray-400 cursor-not-allowed"
                   title="Document upload coming soon"
                 >
                   ↓ Statement of Values (SOV)
-                </button>
-              </div>
+                </BrutalButton>
+              </BrutalCard>
 
               {/* Exposure map */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-                <h3 className="font-semibold text-gray-900 mb-4">Portfolio Exposure</h3>
+              <BrutalCard className="p-6">
+                <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Portfolio Exposure</h3>
                 <ExposureMap />
-              </div>
+              </BrutalCard>
 
             </div>
 
@@ -794,21 +797,21 @@ export default function DealPage() {
 
               {/* Your position — only when invested */}
               {isConnected && principalOf !== undefined && principalOf > 0n && (
-                <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-                  <h3 className="font-semibold text-gray-900 mb-1">Your Position</h3>
-                  <div className="text-3xl font-bold text-gray-900 mb-0.5">{formatUSDC(principalOf)}</div>
-                  <div className="text-xs text-gray-400 mb-4">Principal deposited</div>
+                <BrutalCard className="p-5">
+                  <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-1">Your Position</h3>
+                  <div className="text-3xl font-bold text-[var(--rhodex-text-dark)] mb-0.5">{formatUSDC(principalOf)}</div>
+                  <div className="text-xs text-[var(--rhodex-text-dark-muted)] mb-4">Principal deposited</div>
 
                   {/* Coupon progress bar */}
                   {totalCoupon > 0n && (
-                    <div className="mb-4 p-3 bg-green-50 border border-green-100 rounded-xl">
+                    <div className="mb-4 p-3 border-2 border-green-200 bg-green-50">
                       <div className="flex justify-between text-xs mb-1.5">
                         <span className="text-green-700 font-medium">Coupon earned</span>
                         <span className="text-green-700 font-semibold">{claimedPct}%</span>
                       </div>
-                      <div className="w-full bg-green-100 rounded-full h-2.5 mb-2">
+                      <div className="w-full border border-green-300 bg-green-100/50 h-2.5 mb-2">
                         <div
-                          className="h-2.5 rounded-full bg-green-500 transition-all"
+                          className="h-full bg-green-500 transition-all"
                           style={{ width: `${claimedPct}%` }}
                         />
                       </div>
@@ -824,73 +827,76 @@ export default function DealPage() {
 
                   <div className="space-y-2 mb-4">
                     <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">Wallet balance</span>
+                      <span className="text-[var(--rhodex-text-dark-muted)]">Wallet balance</span>
                       <span className="font-medium">{formatUSDC(tokenBalance)}</span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">Principal withdrawn</span>
+                      <span className="text-[var(--rhodex-text-dark-muted)]">Principal withdrawn</span>
                       <span className="font-medium">{principalWithdrawn ? 'Yes ✓' : 'No'}</span>
                     </div>
                   </div>
 
                   {/* Coupon claim — Active or Triggered */}
                   {(statusNum === 2 || statusNum === 4) && (
-                    <button onClick={() => write('claimCoupon')} disabled={isBusy}
-                      className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 mb-2">
+                    <BrutalButton size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy} className="mb-2">
                       Claim Coupon
-                    </button>
+                    </BrutalButton>
                   )}
 
                   {/* Withdraw principal — Matured */}
                   {statusNum === 3 && (
                     <>
-                      <button onClick={() => write('withdrawPrincipal')} disabled={isBusy || !!principalWithdrawn}
-                        className="w-full py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50 mb-2">
+                      <BrutalButton
+                        tone="success"
+                        size="w-full py-2.5 text-sm"
+                        onClick={() => write('withdrawPrincipal')}
+                        disabled={isBusy || !!principalWithdrawn}
+                        className="mb-2"
+                      >
                         {principalWithdrawn ? 'Principal Withdrawn ✓' : 'Withdraw Principal'}
-                      </button>
-                      <button onClick={() => write('claimCoupon')} disabled={isBusy}
-                        className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                      </BrutalButton>
+                      <BrutalButton size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy}>
                         Claim Remaining Coupon
-                      </button>
+                      </BrutalButton>
                     </>
                   )}
-                </div>
+                </BrutalCard>
               )}
 
               {/* Connect prompt when not connected */}
               {!isConnected && (
-                <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm text-center">
-                  <p className="text-sm text-gray-500 mb-3">Connect your wallet to see your position.</p>
+                <BrutalCard className="p-5 text-center">
+                  <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-3">Connect your wallet to see your position.</p>
                   <ConnectButton />
-                </div>
+                </BrutalCard>
               )}
 
               {/* Trigger status */}
               {bondAddress && <TriggerWidget bondStatus={status} />}
 
               {/* Related news */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-                <h3 className="font-semibold text-gray-900 mb-3">Related Reports</h3>
+              <BrutalCard className="p-5">
+                <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-3">Related Reports</h3>
                 <div className="space-y-4">
                   {NEWS.map((n, i) => (
-                    <div key={i} className="border-b border-gray-50 last:border-0 pb-4 last:pb-0">
+                    <div key={i} className="border-b-2 border-[var(--rhodex-text-dark)]/10 last:border-0 pb-4 last:pb-0">
                       <div className="flex items-center gap-1.5 mb-1">
                         <span className="text-xs font-medium text-orange-600">{n.source}</span>
-                        <span className="text-xs text-gray-400">· {n.date}</span>
+                        <span className="text-xs text-[var(--rhodex-text-dark-muted)]">· {n.date}</span>
                       </div>
                       <a href={n.url} target="_blank" rel="noopener noreferrer"
-                        className="text-sm font-medium text-gray-900 hover:text-blue-600 block mb-1">
+                        className="text-sm font-medium text-[var(--rhodex-text-dark)] hover:text-[var(--rhodex-accent)] block mb-1">
                         {n.title} ›
                       </a>
-                      <p className="text-xs text-gray-500 leading-relaxed">{n.summary}</p>
+                      <p className="text-xs text-[var(--rhodex-text-dark-muted)] leading-relaxed">{n.summary}</p>
                     </div>
                   ))}
                 </div>
-              </div>
+              </BrutalCard>
 
               {/* Refresh */}
               <div className="text-center">
-                <button onClick={() => { refetchBond(); refetchUser() }} className="text-xs text-gray-400 hover:text-gray-700 underline">
+                <button onClick={() => { refetchBond(); refetchUser() }} className="text-xs text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] underline">
                   Refresh data
                 </button>
               </div>
