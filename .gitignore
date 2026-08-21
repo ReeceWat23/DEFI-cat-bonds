@@ -29,6 +29,11 @@ coverage/
 lcov.info
 coverage.json
 
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # Logs
 *.log
 
