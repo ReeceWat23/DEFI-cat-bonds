@@ -1,0 +1,41 @@
+/* Section 5 — the interactive block. Ported from a standalone Three.js/vanilla-JS
+   prototype (howitworksv2) where these rules lived on <body>/global selectors;
+   rescoped here since the section now sits mid-page among the rest of /v2.
+   Same light field + navy text as the rest of the page — no separate dark
+   panel, so this section reads as continuous with sections 1-4 rather than
+   a standalone break. */
+.stage {
+  background: linear-gradient(180deg, var(--field-top) 0%, var(--field-mid) 45%, var(--field-low) 100%);
+  color: var(--navy);
+  cursor: default;
+}
+
+.rail { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; }
+.stateLabel { font-size: 13px; letter-spacing: .02em; opacity: .85; }
+.stateLabel span { opacity: .6; }
+
+.copy h2 { font-weight: 300; font-size: clamp(17px, 1.7vw, 25px); line-height: 1.35; letter-spacing: -.01em; }
+.copy p { margin-top: 14px; font-size: 12px; opacity: .75; }
+
+.detail { opacity: 0; transition: opacity .2s; }
+.detail.on { opacity: 1; }
+.detail h3 { font-weight: 400; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; opacity: .7; margin-bottom: 12px; }
+.detail .body { font-size: clamp(15px, 1.35vw, 19px); font-weight: 300; line-height: 1.5; min-height: 6em; }
+.detail .meta { margin-top: 18px; font-size: 12px; opacity: .7; min-height: 2.4em; }
+
+.caret { display: inline-block; width: .5em; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.close {
+  margin-top: 22px; background: none; border: 1px solid rgba(45,66,116,.4); border-radius: 8px;
+  color: var(--navy); font: inherit; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 8px 12px; cursor: pointer; opacity: 0; transition: opacity .2s;
+}
+.close.on { opacity: .85; }
+
+.hint { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .6; }
+
+@media (max-width: 820px) {
+  .rail { background: linear-gradient(180deg, transparent, rgba(223,227,232,.75) 30%); }
+  .hint { display: none; }
+}

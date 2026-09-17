@@ -2,7 +2,7 @@
 RHODEX Bonds API
 Base: https://realestatesimplified.xyz/version-test/api/1.1/wf/<endpoint>
 
-Four endpoints, one lifecycle:
+Five endpoints:
 
   1. mkr_bond            — create a bond record off-chain. Returns a unique ID.
   2. link-bond            — once the sponsor's contract is deployed on-chain,
@@ -10,6 +10,10 @@ Four endpoints, one lifecycle:
   3. update-bond-status   — flip status-tiggered as the bond's on-chain
                             lifecycle advances (triggered / matured).
   4. get_bond             — read a bond record back by id.
+  5. get_bonds            — list every bond record of a given trigger type.
+                            POST {"type": "natcat"} returns every natcat_loss
+                            bond (economic-loss and industry-loss together —
+                            same product, see list_bonds()).
 
 The unique ID is what ties the off-chain bond record to the on-chain contract:
 create the record first (no contract address yet), deploy the contract,
@@ -25,6 +29,9 @@ Bond object shape (see `build_bond_payload`):
         "SOV":               file,
         "status-tiggered":   number,   # 0 ok, 1 triggered, 2 matured — field name matches the API's own typo, don't "fix" it
         "value":             number,   # deal value in USD
+        "trigger-address":   string,   # NEW (sprint §2.6) — not yet /initialize'd on live Bubble, see build_bond_payload()
+        "product-id":        string,   # NEW — same caveat
+        "product-version":   number,   # NEW — same caveat
     }
 
 Auth: RHODEX_API_KEY loaded from .env (Bearer token), same as natcat_loss.py.
@@ -55,6 +62,14 @@ Confirmed live and working, in order:
                           the same field); and "maturity" comes back as a
                           Bubble-internal epoch-ms timestamp, not the ISO
                           date string you send on create.
+  5. get_bonds          — POST {"type": "natcat"}. Returns
+                          {"response": {"bonds": [...]}} — a list, not a
+                          single record. Same "status-triggered"/epoch-ms
+                          "maturity" read quirks as get_bond. Each record
+                          also carries a "trigger" string field (e.g.
+                          "ILW/econ") that isn't in the write-side spec
+                          above — a read-only/legacy field, distinct from
+                          the not-yet-live "trigger-address" write field.
 """
 
 import os
@@ -76,6 +91,7 @@ ENDPOINTS = {
     "link_contract_address": "link-bond",
     "update_status":        "update-bond-status",
     "get_bond":             "get_bond",
+    "list_bonds":           "get_bonds",
 }
 
 
@@ -122,6 +138,9 @@ def build_bond_payload(
     contract_address: str = "",
     loss_history: str = "",
     sov: str = "",
+    trigger_address: str = "",
+    product_id: str = "",
+    product_version: int = 0,
 ) -> dict:
     """
     Build the bond object. Every field from the spec is always present in
@@ -137,6 +156,17 @@ def build_bond_payload(
     they're passed through as plain strings (e.g. a filename or URL
     placeholder) — fine for the record-linking flow this module exists to
     prove out.
+
+    trigger_address / product_id / product_version are new for the sprint's
+    §2.6 ("bond gets trigger_address, product_id, product_version"). They're
+    included in the payload shape here, but — unlike every other field —
+    **no live `/initialize` call has been made registering them on the real
+    Bubble workflow yet.** Per this module's own established pattern (see
+    the SETUP NOTE below), an undeclared parameter 404s/400s until that
+    one-time registration happens against the live API, so populating these
+    today will not actually persist anything until that step is run
+    deliberately — this is a live, one-way change to shared infrastructure,
+    not something to trigger silently as a side effect of running code.
     """
     return {
         "cedant":           cedant,
@@ -147,6 +177,9 @@ def build_bond_payload(
         "SOV":              sov,
         "status-tiggered":  status_tiggered,
         "value":            value,
+        "trigger-address":  trigger_address,
+        "product-id":       product_id,
+        "product-version":  product_version,
     }
 
 
@@ -176,6 +209,37 @@ def get_bond(unique_id: str) -> dict:
     return _post("get_bond", {"bond-id": unique_id})
 
 
+def list_bonds(bond_type: str = "natcat") -> dict:
+    """
+    POST get_bonds — every bond record of a given trigger type. `bond_type`
+    "natcat" covers both economic-loss and industry-loss deals in one call
+    (they're the same natcat_loss product, two metrics from one endpoint —
+    see products/README.md), matching how CANONICAL_TRIGGERS and the
+    Trigger status dashboard already treat that pairing. Returns the raw
+    response; use extract_bonds() to pull the list out of it.
+    """
+    return _post("list_bonds", {"type": bond_type})
+
+
+def extract_bonds(list_response: dict) -> list[dict]:
+    """
+    Same defensive-candidate approach as extract_unique_id() — the list
+    endpoint's response schema isn't documented in the source spec, so try
+    the field names Bubble commonly uses for a list result, at both the
+    top level and under the "response" wrapper every other endpoint here
+    nests its payload in.
+    """
+    candidates = ("bonds", "results", "response")
+    for container in (list_response, list_response.get("response", {})):
+        if not isinstance(container, dict):
+            continue
+        for key in candidates:
+            value = container.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
 def extract_unique_id(create_response: dict) -> str | None:
     """
     Response schema isn't documented in the source spec — try the field
@@ -196,6 +260,7 @@ def extract_unique_id(create_response: dict) -> str | None:
 #
 # Exercises all four endpoints against the LIVE API: create a bond record,
 # generate a fake on-chain contract address (no real deploy — that's the
+
 # Foundry side, out of scope here), link it, bump status, read it back, then
 # print a simulated "contract read" to prove the off-chain unique ID and the
 # on-chain address are tied together correctly.

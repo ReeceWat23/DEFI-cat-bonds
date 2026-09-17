@@ -55,3 +55,21 @@ export function daysToSeconds(days) {
 export function safeParseUSDC(str) {
   try { return parseUSDC(str) } catch { return 0n }
 }
+
+/** Formats an on-chain "usd_billions x 1e9" integer as "$142B" / "$46M". */
+export function formatUSDWhole(n) {
+  if (n == null) return '—'
+  const b = Number(n) / 1e9
+  if (b >= 1) return `$${b.toFixed(0)}B`
+  const m = Number(n) / 1e6
+  return `$${m.toFixed(0)}M`
+}
+
+/** Human-readable age of a unix-seconds timestamp, e.g. "3h ago", "12d ago". */
+export function formatAge(reportedAtSeconds) {
+  if (reportedAtSeconds === undefined || reportedAtSeconds === null || Number(reportedAtSeconds) === 0) return '—'
+  const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - Number(reportedAtSeconds))
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`
+  return `${Math.floor(ageSec / 86400)}d ago`
+}

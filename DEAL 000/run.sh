@@ -10,7 +10,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 RPC="http://127.0.0.1:8545"
 LOG="/tmp/anvil-deal000.log"
 
@@ -60,15 +59,11 @@ done
 
 echo ""
 
-# ── 3. Compile and deploy ─────────────────────────────────────────────────────
+# ── 3. Create the web2 deal record, deploy, link, verify ─────────────────────
 echo "  Deploying DEAL 000 contracts ($SCENARIO_LABEL)..."
 echo ""
 
-forge script script/Setup.s.sol:Setup \
-  --rpc-url "$RPC" \
-  --broadcast \
-  --private-key "$DEPLOYER_PK" \
-  -vv
+python3 ../api/deploy_deal.py fixture.json "$SCENARIO"
 
 # ── 4. Print cheat-sheet ──────────────────────────────────────────────────────
 echo ""

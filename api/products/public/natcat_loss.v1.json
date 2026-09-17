@@ -1,0 +1,43 @@
+{
+  "product_id": "natcat_loss",
+  "version": 1,
+  "status": "deprecated",
+  "name": "RHODEX NatCat Loss — annual economic & industry loss",
+  "endpoint": "https://realestatesimplified.xyz/version-test/api/1.1/wf/RHODEX-NATCAT-LOSS",
+  "method": "POST",
+  "auth": "RHODEX_API_KEY",
+  "call_parameters": {
+    "ALL": "yes"
+  },
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "response": {
+        "type": "object",
+        "properties": {
+          "ALL-LOSSES": {
+            "type": "array",
+            "description": "One entry per calendar year, oldest first. Use the last entry for the latest confirmed figure. Both loss figures come from the same year record — one API call, two metrics.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "year": { "type": "string" },
+                "economic-loss | total": { "type": "number", "description": "Full-year total economic loss, $B" },
+                "industry-loss | total": { "type": "number", "description": "Full-year insured (industry) loss, $B" },
+                "source | total ": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value_paths": {
+    "economic_loss": "response.ALL-LOSSES[-1].\"economic-loss | total\"",
+    "industry_loss": "response.ALL-LOSSES[-1].\"industry-loss | total\""
+  },
+  "units": "usd_billions",
+  "update_frequency": "quarterly",
+  "max_report_age": 150,
+  "data_source_description": "DEPRECATED 2026-09-16 — see v2. This version's value_paths assumed the latest year in ALL-LOSSES always has a full-year total; live data proved that false (the in-progress current year only has quarterly figures until it completes, and ALL-LOSSES[-1] is that same in-progress record). v2 switches to the simpler latest-report endpoint and adds a total-then-quarterly fallback chain. RHODEX NatCat Loss API — Gallagher Re-sourced catastrophe loss, reported quarterly with cumulative full-year totals."
+}

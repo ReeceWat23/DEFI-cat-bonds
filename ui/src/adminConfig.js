@@ -17,3 +17,16 @@ export async function checkPassword(input) {
     .join('')
   return hex === ADMIN_PASSWORD_HASH
 }
+
+// Purely cosmetic "who are you" greeting on the password gate — not a second
+// factor, the password alone still gates entry. Case-insensitive, trimmed.
+const NICKNAME_GREETINGS = {
+  jefe: 'Bread Boi',
+  chef: 'Bread Boi',
+  'big momma': 'Heloisa',
+}
+
+export function nicknameGreeting(input) {
+  const name = NICKNAME_GREETINGS[input.trim().toLowerCase()]
+  return name ? `Welcome back, ${name}` : null
+}

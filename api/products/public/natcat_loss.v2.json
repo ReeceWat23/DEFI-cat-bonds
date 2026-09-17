@@ -1,0 +1,53 @@
+{
+  "product_id": "natcat_loss",
+  "version": 2,
+  "status": "active",
+  "name": "RHODEX NatCat Loss — latest report (economic & industry loss)",
+  "endpoint": "https://realestatesimplified.xyz/version-test/api/1.1/wf/latest-report",
+  "method": "POST",
+  "auth": "RHODEX_API_KEY",
+  "call_parameters": {},
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "response": {
+        "type": "object",
+        "properties": {
+          "reports": {
+            "type": "object",
+            "description": "The single most recently added report — no year/ALL params needed, this endpoint always returns the latest record directly. For the current in-progress year, only the quarters completed so far are populated; the full-year total fields only appear once the year finishes.",
+            "properties": {
+              "year": { "type": "string" },
+              "economic-loss | total": { "type": "number", "description": "Full-year total economic loss, $B — absent until the year completes" },
+              "industry-loss | total": { "type": "number", "description": "Full-year insured (industry) loss, $B — absent until the year completes" },
+              "Q1 economic": { "type": "number" },
+              "Q1 industry": { "type": "number" },
+              "Q2 | economic": { "type": "number" },
+              "Q2 | industry": { "type": "number" },
+              "Q3 | economic ": { "type": "number", "description": "Field name has a trailing space — matches the live API exactly, not a typo to fix" },
+              "Q3 | industry ": { "type": "number", "description": "Field name has a trailing space — matches the live API exactly, not a typo to fix" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value_paths": {
+    "economic_loss": [
+      "response.reports.\"economic-loss | total\"",
+      "response.reports.\"Q3 | economic \"",
+      "response.reports.\"Q2 | economic\"",
+      "response.reports.\"Q1 economic\""
+    ],
+    "industry_loss": [
+      "response.reports.\"industry-loss | total\"",
+      "response.reports.\"Q3 | industry \"",
+      "response.reports.\"Q2 | industry\"",
+      "response.reports.\"Q1 industry\""
+    ]
+  },
+  "units": "usd_billions",
+  "update_frequency": "quarterly",
+  "max_report_age": 150,
+  "data_source_description": "RHODEX's latest-report endpoint — the same NatCat Loss dataset as v1, but returns only the most recently added record directly (no ALL-LOSSES array to fetch and index into). Each metric falls back from the full-year total to the latest available quarter, mirroring api/natcat_loss.py's own latest_loss_for_year() logic, since the current in-progress year never has a total until it completes."
+}

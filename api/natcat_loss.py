@@ -109,6 +109,26 @@ def fetch(year: str | None = None) -> dict:
     return fetch_year_losses(year) if year else fetch_all_losses()
 
 
+LATEST_REPORT_URL = f"{API_BASE}/latest-report"
+
+
+def fetch_latest_report() -> dict:
+    """
+    Return the single most recently added report directly — no ALL/YEAR
+    params, no array to fetch and index into. Equivalent to
+    fetch_all_losses()'s last ALL-LOSSES entry (confirmed live: identical
+    `_id`), just without fetching the whole history first. Added
+    2026-09-16 alongside api/products/public/natcat_loss.v2.json, which
+    uses this endpoint as its source.
+
+    Response is nested under response["reports"] (singular record, despite
+    the plural key name — matches the live API, not a typo to fix).
+    """
+    resp = requests.post(LATEST_REPORT_URL, headers=_headers(), json={}, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ── Parsed helpers ─────────────────────────────────────────────────────────────
 
 def get_records() -> list[dict]:

@@ -34,6 +34,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Monitor service runtime data (api/monitor/) — accumulated at runtime,
+# never committed. Tests use a temp DB via monkeypatch, not this file.
+api/monitor/data/
+
+# Local scratch/reference material (v2 homepage port source) — not app code
+/files 1/
+/rhodex-home-nextjs.zip
+/rhodexv2full/
+
 # Logs
 *.log
 

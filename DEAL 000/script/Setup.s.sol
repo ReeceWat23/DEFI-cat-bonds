@@ -7,11 +7,21 @@ import "../src/RDX.sol";
 import "catbond/TriggerBase.sol";
 import "catbond/CatBond.sol";
 
-/// @dev Concrete trigger for DEAL 000.
-///      Fires when total economic losses are reported >= $370B (Gallagher Re source).
+/// @dev Concrete trigger for DEAL 000. Reports economic-loss or industry-loss
+///      figures (selected by which valuePath it's deployed with) from the
+///      api/products/public/natcat_loss.v2.json product — see that file and
+///      api/products/README.md for the full definition this snapshots.
 contract Deal000Trigger is TriggerBase {
-    constructor(address _owner, uint256 _lossLimit, uint8 _dealType)
-        TriggerBase(_owner, _lossLimit, _dealType) {}
+    constructor(
+        address _owner,
+        address _reporter,
+        string memory _productId,
+        uint256 _version,
+        string memory _valuePath,
+        string memory _units,
+        uint256 _maxReportAge,
+        string memory _endpoint
+    ) TriggerBase(_owner, _reporter, _productId, _version, _valuePath, _units, _maxReportAge, _endpoint) {}
 }
 
 /// @notice Full local deployment for DEAL 000 end-to-end testing.
@@ -47,6 +57,33 @@ contract Setup is Script {
         uint256 subDuration  = quick ? 60        : 3_600;      // 1 min  vs 1 hour
         uint256 termDuration = quick ? 5 minutes : 3 days;     // 5 min  vs 3 days
 
+        // Set by run.sh once the web2 Deal store record has been created —
+        // this is the bidirectional link (Deal Page - Dynamic Data v2, §3.3).
+        // Empty string is a valid "no web2 record yet" placeholder for
+        // standalone local runs.
+        string memory dealId = vm.envOr("DEAL_ID", string(""));
+
+        // TRIGGER_TYPE: 0 = Industry (insured) loss, 1 = Economic (total) loss.
+        // LOSS_THRESHOLD_B: threshold in billions of USD. Defaults match the
+        // original DEAL 000 fixture (economic loss, $370B). Threshold now
+        // lives on CatBond itself, not the trigger — see CatBond.sol's
+        // `threshold` field and checkTrigger().
+        uint8   dealType    = uint8(vm.envOr("TRIGGER_TYPE", uint256(1)));
+        uint256 thresholdB  = vm.envOr("LOSS_THRESHOLD_B", uint256(370));
+        uint256 threshold   = thresholdB * 1_000_000_000;
+
+        // Snapshotted from api/products/public/natcat_loss.v2.json — see
+        // that file and api/products/README.md's "one endpoint, multiple
+        // metrics" design. dealType selects which of the product's two
+        // metrics this trigger reports on; the string below is just that
+        // metric's primary (full-year total) field for on-chain
+        // identification — the monitor resolves the real value off-chain
+        // with a total→quarterly fallback chain (v2's value_paths).
+        string memory valuePath = dealType == 1
+            ? "response.reports.\"economic-loss | total\""
+            : "response.reports.\"industry-loss | total\"";
+        uint256 maxReportAge = 150 days; // matches the product's max_report_age (150 days)
+
         vm.startBroadcast();
 
         // 1 — Deploy RDX stablecoin
@@ -63,24 +100,43 @@ contract Setup is Script {
         (bool ok3,) = payable(INVESTOR).call{value: ETH_PER_WALLET}("");
         require(ok1 && ok2 && ok3, "ETH transfer failed");
 
-        // 4 — Deploy trigger ($370B economic loss threshold, confirmed by Gallagher Re)
+        // 4 — Deploy trigger. Company wallet is both owner and reporter for
+        // now (single wallet, per the sprint's Q2 — multisig is a future
+        // setReporter() call, not built here).
         Deal000Trigger trigger = new Deal000Trigger(
             COMPANY,
-            370_000_000_000,  // $370B total economic loss threshold
-            1                 // EconomicLoss (1)
+            COMPANY,
+            "natcat_loss",
+            2,
+            valuePath,
+            "usd_billions",
+            maxReportAge,
+            "https://realestatesimplified.xyz/version-test/api/1.1/wf/latest-report"
         );
+
+        // Canonical Raydion exposure breakdown (Plan-it-2 dealpage doc §4.1),
+        // small enough to hold on-chain: region + percentage points.
+        CatBond.ExposureRegion[] memory exposure = new CatBond.ExposureRegion[](4);
+        exposure[0] = CatBond.ExposureRegion({region: "US", pct: 50});
+        exposure[1] = CatBond.ExposureRegion({region: "China", pct: 30});
+        exposure[2] = CatBond.ExposureRegion({region: "Brazil", pct: 15});
+        exposure[3] = CatBond.ExposureRegion({region: "EU", pct: 5});
 
         // 5 — Deploy CatBond
         CatBond bond = new CatBond(
             SPONSOR,
             COMPANY,
             address(trigger),
+            threshold,
             address(rdx),
             COUPON_BPS,
             COVERAGE,
             MIN_INVEST,
             subDuration,
-            termDuration
+            termDuration,
+            "Raydion",
+            dealId,
+            exposure
         );
 
         vm.stopBroadcast();

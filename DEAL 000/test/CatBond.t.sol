@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "../contracts/CatBond.sol";
-import "../contracts/TriggerBase.sol";
+import "catbond/CatBond.sol";
+import "catbond/TriggerBase.sol";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal ERC-20 mock — no dependency on OZ in the test itself.
@@ -43,11 +43,24 @@ contract MockUSDC {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Concrete trigger for testing
+// Concrete triggers for testing
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// @dev Fixed config, owner doubles as reporter — for tests that just need a
+///      working trigger and don't care about maxReportAge/reporter details.
+///      365-day maxReportAge comfortably covers this suite's 365-day terms.
 contract TestTrigger is TriggerBase {
-    // lossLimit=1 so report() can fire the trigger with any real loss value in tests
-    constructor(address _owner) TriggerBase(_owner, 1, 0) {}
+    constructor(address _owner)
+        TriggerBase(_owner, _owner, "test_product", 1, "value.path", "usd_billions", 365 days, "https://example.com")
+    {}
+}
+
+/// @dev Lets a test control owner, reporter, and maxReportAge independently —
+///      needed for access-control tests and staleness tests.
+contract TestTriggerConfigurable is TriggerBase {
+    constructor(address _owner, address _reporter, uint256 _maxReportAge)
+        TriggerBase(_owner, _reporter, "test_product", 1, "value.path", "usd_billions", _maxReportAge, "https://example.com")
+    {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +87,9 @@ contract CatBondTest is Test {
     uint256 constant SUB_DURATION         = 7 days;
     uint256 constant TERM_DURATION        = 365 days;        // 1-year term
     uint256 constant BPS_DENOMINATOR      = 10_000;
+    // Threshold = 1 (whole USD): any real postReport() value fires this bond's
+    // trigger, mirroring the old TestTrigger's fixed lossLimit=1 convenience.
+    uint256 constant THRESHOLD            = 1;
 
     // ── contracts ────────────────────────────────────────────────────────────
     MockUSDC    usdc;
@@ -89,12 +105,16 @@ contract CatBondTest is Test {
             sponsor,
             companyWallet,
             address(trig),
+            THRESHOLD,
             address(usdc),
             uint16(COUPON_BPS),
             COVERAGE,
             MIN_INVEST,
             SUB_DURATION,
-            TERM_DURATION
+            TERM_DURATION,
+            "Test Seller",
+            "test-deal-id",
+            new CatBond.ExposureRegion[](0)
         );
     }
 
@@ -128,6 +148,12 @@ contract CatBondTest is Test {
     function _closeSubscription() internal {
         vm.warp(bond.subscriptionEnd() + 1);
         bond.closeSubscription();
+    }
+
+    /// @dev Post a report from the company wallet (the trigger's reporter).
+    function _report(uint256 value) internal {
+        vm.prank(companyWallet);
+        trig.postReport(value, bytes32(0));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -178,6 +204,15 @@ contract CatBondTest is Test {
                                 / (10_000 * 365 days);
         assertEq(inv1TotalCoupon, expectedTotal);
 
+        // ── company must have a fresh, below-threshold report before markMatured() ──
+        // Under the new "checkTrigger() first, always" design, markMatured() —
+        // like settle() — requires a valid report in window. A missed report
+        // blocks either outcome; this is the operational tradeoff the sprint
+        // takes on instead of paying an oracle network (see api/it3_plan_
+        // triggers_n_mgmnt.md §1). Posting at exactly `maturity` keeps it
+        // fresh relative to TestTrigger's 365-day maxReportAge.
+        _report(0);
+
         // ── company calls markMatured ─────────────────────────────────────────
         vm.prank(companyWallet);
         bond.markMatured();
@@ -213,9 +248,8 @@ contract CatBondTest is Test {
         uint256 quarterTerm = TERM_DURATION / 4;
         vm.warp(bond.activeStart() + quarterTerm);
 
-        // Trigger fires
-        vm.prank(companyWallet);
-        trig.setTriggered(true);
+        // Trigger fires — a fresh report at/above this bond's threshold (1)
+        _report(1);
 
         uint256 sponsorBefore = usdc.balanceOf(sponsor);
 
@@ -348,23 +382,37 @@ contract CatBondTest is Test {
         bond.closeSubscription();
     }
 
-    /// @dev settle() from non-company wallet reverts.
+    /// @dev settle() from non-company wallet reverts — access control fires
+    ///      before checkTrigger() is ever reached, so no report is needed.
     function test_Reject_SettleFromStranger() public {
         _sponsorFunds();
         _investorDeposits(investor1, 25_000 * 1e6);
         _closeSubscription();
-        vm.prank(companyWallet);
-        trig.setTriggered(true);
         vm.prank(stranger);
         vm.expectRevert(CatBond.NotCompanyWallet.selector);
         bond.settle();
     }
 
-    /// @dev settle() when trigger has not fired reverts.
-    function test_Reject_SettleWhenNotTriggered() public {
+    /// @dev settle() reverts when no report has ever been posted — checkTrigger()'s
+    ///      revert (from the trigger's own empty report log) propagates, it is
+    ///      not swallowed into "not triggered."
+    function test_Reject_SettleWhenNoReportPosted() public {
         _sponsorFunds();
         _investorDeposits(investor1, 25_000 * 1e6);
         _closeSubscription();
+        vm.prank(companyWallet);
+        vm.expectRevert(TriggerBase.NoReports.selector);
+        bond.settle();
+    }
+
+    /// @dev settle() reverts with TriggerNotFired specifically when a valid,
+    ///      fresh report exists but is below threshold — distinct from the
+    ///      no-report-at-all case above.
+    function test_Reject_SettleWhenReportedBelowThreshold() public {
+        _sponsorFunds();
+        _investorDeposits(investor1, 25_000 * 1e6);
+        _closeSubscription();
+        _report(0); // below THRESHOLD=1
         vm.prank(companyWallet);
         vm.expectRevert(CatBond.TriggerNotFired.selector);
         bond.settle();
@@ -380,13 +428,12 @@ contract CatBondTest is Test {
         bond.markMatured();
     }
 
-    /// @dev markMatured() when trigger has fired reverts.
+    /// @dev markMatured() when a fresh report shows the threshold cleared reverts.
     function test_Reject_MarkMatureWhenTriggered() public {
         _sponsorFunds();
         _closeSubscription();
-        vm.prank(companyWallet);
-        trig.setTriggered(true);
         vm.warp(bond.maturity() + 1);
+        _report(1); // posted right before the check, so it's still fresh
         vm.prank(companyWallet);
         vm.expectRevert(CatBond.TriggerAlreadyFired.selector);
         bond.markMatured();
@@ -426,8 +473,9 @@ contract CatBondTest is Test {
         MockUSDC bigUsdc = new MockUSDC();
         TestTrigger bigTrig = new TestTrigger(companyWallet);
         CatBond bigBond = new CatBond(
-            sponsor, companyWallet, address(bigTrig), address(bigUsdc),
-            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, SUB_DURATION, TERM_DURATION
+            sponsor, companyWallet, address(bigTrig), THRESHOLD, address(bigUsdc),
+            uint16(COUPON_BPS), bigCoverage, MIN_INVEST, SUB_DURATION, TERM_DURATION,
+            "Test Seller", "test-deal-id", new CatBond.ExposureRegion[](0)
         );
 
         // Sponsor funds
@@ -516,12 +564,16 @@ contract CatBondTest is Test {
             sponsor,
             companyWallet,
             address(yearTrig),
+            THRESHOLD,
             address(yearUsdc),
             uint16(COUPON_BPS),
             principal,   // $25k coverage — one investor fills it exactly
             principal,   // $25k minimum
             1,           // 1-second subscription window
-            TERM_DURATION
+            TERM_DURATION,
+            "Test Seller",
+            "test-deal-id",
+            new CatBond.ExposureRegion[](0)
         );
 
         // Sponsor funds
@@ -661,25 +713,69 @@ contract CatBondTest is Test {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Guard: trigger must not have fired before subscription closes
+// Deploy-time trigger validation (§2.5 — "reverts if zero or if the address
+// does not implement the trigger interface")
+// ─────────────────────────────────────────────────────────────────────────────
+contract TriggerValidationTest is Test {
+    address sponsor       = address(0xA1);
+    address companyWallet = address(0xA2);
+
+    // Note: this takes a pre-deployed usdc address rather than creating one
+    // itself. vm.expectRevert() attaches to the very next CALL/CREATE the
+    // test makes — if this helper created MockUSDC internally, that CREATE
+    // (which succeeds) would consume the expectation before `new CatBond`
+    // ever ran, and the test would report "next call did not revert."
+    function _deployWithTrigger(address triggerAddr, address usdc) internal {
+        new CatBond(
+            sponsor, companyWallet, triggerAddr, 1, usdc,
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days,
+            "Test Seller", "test-deal-id", new CatBond.ExposureRegion[](0)
+        );
+    }
+
+    function test_Deploy_RevertsOnZeroTrigger() public {
+        address usdc = address(new MockUSDC());
+        vm.expectRevert(CatBond.ZeroTrigger.selector);
+        _deployWithTrigger(address(0), usdc);
+    }
+
+    function test_Deploy_RevertsOnEOATrigger() public {
+        address usdc = address(new MockUSDC());
+        vm.expectRevert(CatBond.InvalidTrigger.selector);
+        _deployWithTrigger(address(0xDEAD), usdc); // no code at this address
+    }
+
+    function test_Deploy_RevertsOnNonConformingContract() public {
+        address usdc = address(new MockUSDC());
+        MockUSDC notATrigger = new MockUSDC(); // has code, but no reportCount()
+        vm.expectRevert(CatBond.InvalidTrigger.selector);
+        _deployWithTrigger(address(notATrigger), usdc);
+    }
+
+    function test_Deploy_SucceedsWithConformingTrigger() public {
+        address usdc = address(new MockUSDC());
+        TestTrigger trig = new TestTrigger(companyWallet);
+        _deployWithTrigger(address(trig), usdc); // must not revert
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Guard: trigger must not have already fired before subscription closes
 // ─────────────────────────────────────────────────────────────────────────────
 contract EarlyTriggerGuardTest is Test {
 
     address sponsor       = address(0xA1);
     address companyWallet = address(0xA2);
     address investor1     = address(0xB1);
+    uint256 constant THRESHOLD = 1;
 
-    function test_CloseSubscription_RevertsIfTriggerAlreadyFired() public {
-        MockUSDC usdc = new MockUSDC();
-        // lossLimit=1 so any report fires immediately
-        TestTrigger trig = new TestTrigger(companyWallet);
-
+    function _deployAndFundToSubscriptionClose(MockUSDC usdc, TestTrigger trig) internal returns (CatBond) {
         CatBond bond = new CatBond(
-            sponsor, companyWallet, address(trig), address(usdc),
-            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days
+            sponsor, companyWallet, address(trig), THRESHOLD, address(usdc),
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days,
+            "Test Seller", "test-deal-id", new CatBond.ExposureRegion[](0)
         );
 
-        // Fund + deposit so subscription can close
         uint256 budget = bond.requiredCouponBudget();
         usdc.mint(sponsor, budget + budget * 50 / 10_000);
         vm.prank(sponsor); usdc.approve(address(bond), budget + budget * 50 / 10_000);
@@ -689,159 +785,365 @@ contract EarlyTriggerGuardTest is Test {
         vm.prank(investor1); usdc.approve(address(bond), 50_000e6 + 50_000e6 * 50 / 10_000);
         vm.prank(investor1); bond.deposit(50_000e6, 50_000e6);
 
-        // Fire trigger DURING subscription (before closeSubscription)
-        vm.prank(companyWallet); trig.setTriggered(true);
-        assertTrue(trig.isTriggered(), "trigger should be fired");
+        return bond;
+    }
+
+    function test_CloseSubscription_RevertsIfTriggerAlreadyFired() public {
+        MockUSDC usdc = new MockUSDC();
+        TestTrigger trig = new TestTrigger(companyWallet);
+        CatBond bond = _deployAndFundToSubscriptionClose(usdc, trig);
+
+        // Report DURING subscription (before closeSubscription) at/above threshold
+        vm.prank(companyWallet); trig.postReport(1, bytes32(0));
+        assertEq(trig.latestReport().value, 1, "report should be recorded");
         assertEq(uint(bond.status()), uint(CatBond.Status.Subscription), "bond still in Subscription");
 
-        // closeSubscription must revert because trigger is already fired
+        // closeSubscription must revert because the latest report already clears threshold
         vm.warp(block.timestamp + 7 days + 1);
         vm.expectRevert(CatBond.TriggerAlreadyFired.selector);
         bond.closeSubscription();
     }
 
-    function test_CloseSubscription_SucceedsAfterTriggerReset() public {
+    /// @dev The report log is append-only and has no permanent "latched" memory —
+    ///      only the single latest report matters. A later below-threshold report
+    ///      supersedes an earlier above-threshold one for the early guard's purposes.
+    function test_CloseSubscription_SucceedsWhenLatestReportIsBelowThreshold() public {
         MockUSDC usdc = new MockUSDC();
         TestTrigger trig = new TestTrigger(companyWallet);
+        CatBond bond = _deployAndFundToSubscriptionClose(usdc, trig);
 
-        CatBond bond = new CatBond(
-            sponsor, companyWallet, address(trig), address(usdc),
-            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days
-        );
+        vm.prank(companyWallet); trig.postReport(5, bytes32(0));  // above threshold
+        vm.prank(companyWallet); trig.postReport(0, bytes32(0));  // latest: below threshold
 
-        uint256 budget = bond.requiredCouponBudget();
-        usdc.mint(sponsor, budget + budget * 50 / 10_000);
-        vm.prank(sponsor); usdc.approve(address(bond), budget + budget * 50 / 10_000);
-        vm.prank(sponsor); bond.fundCouponBudget();
-
-        usdc.mint(investor1, 50_000e6 + 50_000e6 * 50 / 10_000);
-        vm.prank(investor1); usdc.approve(address(bond), 50_000e6 + 50_000e6 * 50 / 10_000);
-        vm.prank(investor1); bond.deposit(50_000e6, 50_000e6);
-
-        // Fire then reset trigger before subscription closes
-        vm.prank(companyWallet); trig.setTriggered(true);
-        vm.prank(companyWallet); trig.setTriggered(false);
-
-        // Now closeSubscription should succeed
         vm.warp(block.timestamp + 7 days + 1);
         bond.closeSubscription();
-        assertEq(uint(bond.status()), uint(CatBond.Status.Active), "bond must be Active after reset+close");
+        assertEq(uint(bond.status()), uint(CatBond.Status.Active), "bond must be Active - latest report is what counts");
+    }
+
+    function test_CloseSubscription_SucceedsWhenNoReportsExist() public {
+        MockUSDC usdc = new MockUSDC();
+        TestTrigger trig = new TestTrigger(companyWallet);
+        CatBond bond = _deployAndFundToSubscriptionClose(usdc, trig);
+
+        assertEq(trig.reportCount(), 0);
+        vm.warp(block.timestamp + 7 days + 1);
+        bond.closeSubscription(); // must not revert — nothing to guard against
+        assertEq(uint(bond.status()), uint(CatBond.Status.Active));
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Trigger report() tests
-// Covers: ZeroLossLimit guard, threshold-based auto-fire, below-threshold no-fire,
-//         state updates on each report, and end-to-end settle after report fires.
+// TriggerBase — reporter role, report log, and CatBond.checkTrigger() against it
 // ─────────────────────────────────────────────────────────────────────────────
 contract TriggerReportTest is Test {
 
-    address owner   = address(0xA1);
-    address other   = address(0xB1);
+    address owner        = address(0xA1);
+    address reporterAddr = address(0xA3);
+    address other        = address(0xB1);
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // ── TriggerBase unit tests ───────────────────────────────────────────────
 
-    function _triggerWithLimit(uint256 limit) internal returns (TestTriggerConfigurable) {
-        return new TestTriggerConfigurable(owner, limit, 1);
+    function test_Constructor_RevertsOnZeroOwner() public {
+        vm.expectRevert(TriggerBase.ZeroAddress.selector);
+        new TestTriggerConfigurable(address(0), reporterAddr, 365 days);
     }
 
-    // ── Tests ─────────────────────────────────────────────────────────────────
-
-    function test_Trigger_ZeroLossLimitReverts() public {
-        vm.expectRevert(TriggerBase.ZeroLossLimit.selector);
-        new TestTriggerConfigurable(owner, 0, 0);
+    function test_Constructor_RevertsOnZeroReporter() public {
+        vm.expectRevert(TriggerBase.ZeroAddress.selector);
+        new TestTriggerConfigurable(owner, address(0), 365 days);
     }
 
-    function test_Trigger_ReportBelowThreshold_DoesNotFire() public {
-        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);  // $370B
-        assertFalse(trig.isTriggered(), "should not be triggered initially");
-
-        vm.prank(owner);
-        trig.report(142_000_000_000, "Gallagher Re H1 2026");  // $142B < $370B
-
-        assertFalse(trig.isTriggered(), "should not fire below threshold");
-        assertEq(trig.reportedValue(),  142_000_000_000,        "reportedValue must update");
-        assertEq(trig.reportedSource(), "Gallagher Re H1 2026", "reportedSource must update");
+    function test_ReportCount_And_LatestReport_EmptyReverts() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
+        assertEq(trig.reportCount(), 0);
+        vm.expectRevert(TriggerBase.NoReports.selector);
+        trig.latestReport();
     }
 
-    function test_Trigger_ReportAtThreshold_Fires() public {
-        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);
+    function test_PostReport_AppendsAndReads() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
+        vm.prank(reporterAddr);
+        trig.postReport(370_000_000_000, bytes32("ref1"));
 
-        vm.prank(owner);
-        trig.report(370_000_000_000, "Gallagher Re Full-Year 2026");  // exactly at limit
-
-        assertTrue(trig.isTriggered(), "trigger must fire at exactly the threshold");
+        assertEq(trig.reportCount(), 1);
+        ITrigger.Report memory r = trig.latestReport();
+        assertEq(r.value, 370_000_000_000);
+        assertEq(r.reportedAt, block.timestamp);
+        assertEq(r.reporter, reporterAddr);
+        assertEq(r.monitorRef, bytes32("ref1"));
     }
 
-    function test_Trigger_ReportAboveThreshold_Fires() public {
-        TestTriggerConfigurable trig = _triggerWithLimit(370_000_000_000);
-
-        vm.prank(owner);
-        trig.report(420_000_000_000, "Gallagher Re Full-Year 2026");  // $420B > $370B
-
-        assertTrue(trig.isTriggered(), "trigger must fire above threshold");
+    function test_PostReport_OnlyReporter() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
+        vm.prank(other);
+        vm.expectRevert(TriggerBase.NotReporter.selector);
+        trig.postReport(1, bytes32(0));
     }
 
-    function test_Trigger_Report_OnlyOwner() public {
-        TestTriggerConfigurable trig = _triggerWithLimit(100_000_000_000);
+    function test_PostReport_MultipleAppendsInOrder() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
+        vm.prank(reporterAddr); trig.postReport(100, bytes32("a"));
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(reporterAddr); trig.postReport(200, bytes32("b"));
+
+        assertEq(trig.reportCount(), 2);
+        assertEq(trig.latestReport().value, 200, "latest must be the most recent, not the first");
+    }
+
+    function test_LatestReportSince_RespectsWindow() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
+        uint256 t0 = block.timestamp;
+        vm.prank(reporterAddr); trig.postReport(100, bytes32(0));
+
+        ITrigger.Report memory r = trig.latestReportSince(t0);
+        assertEq(r.value, 100);
+
+        vm.expectRevert(TriggerBase.NoReports.selector);
+        trig.latestReportSince(t0 + 1); // the only report predates this window
+    }
+
+    function test_SetReporter_OwnerOnlyAndTakesEffect() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 365 days);
 
         vm.prank(other);
         vm.expectRevert(TriggerBase.NotOwner.selector);
-        trig.report(200_000_000_000, "fake source");
+        trig.setReporter(other);
+
+        vm.prank(owner);
+        trig.setReporter(other);
+        assertEq(trig.reporter(), other);
+
+        vm.prank(reporterAddr);
+        vm.expectRevert(TriggerBase.NotReporter.selector);
+        trig.postReport(1, bytes32(0));
+
+        vm.prank(other);
+        trig.postReport(1, bytes32(0));
+        assertEq(trig.reportCount(), 1);
     }
 
-    function test_Trigger_ReportThenSettle_EndToEnd() public {
-        MockUSDC usdc = new MockUSDC();
-        TestTriggerConfigurable trig = new TestTriggerConfigurable(address(this), 370_000_000_000, 1);
+    function test_MaxReportAge_ReflectsProductConfigSnapshot() public {
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(owner, reporterAddr, 42 days);
+        assertEq(trig.maxReportAge(), 42 days);
+    }
 
-        CatBond bond = new CatBond(
-            address(this),     // sponsor
-            address(this),     // companyWallet
-            address(trig),
-            address(usdc),
-            uint16(500),       // 5% coupon
-            75_000e6,          // $75k coverage
-            25_000e6,          // $25k min
-            1,                 // 1s subscription
-            30 days
+    // ── CatBond.checkTrigger() / settle() against a real report log ─────────
+
+    uint256 constant BOND_THRESHOLD = 370_000_000_000; // $370B
+
+    /// @dev address(this) plays sponsor/companyWallet/reporter throughout, same
+    ///      simplification the original single-file test used — no vm.prank
+    ///      juggling needed for the deploy+fund+deposit+close sequence.
+    function _activeBond(uint256 maxReportAge) internal returns (CatBond bond, TestTriggerConfigurable trig, MockUSDC usdc) {
+        usdc = new MockUSDC();
+        trig = new TestTriggerConfigurable(address(this), address(this), maxReportAge);
+
+        bond = new CatBond(
+            address(this), address(this), address(trig), BOND_THRESHOLD, address(usdc),
+            uint16(500), 75_000e6, 25_000e6, 1, 30 days,
+            "Test Seller", "test-deal-id", new CatBond.ExposureRegion[](0)
         );
 
-        // Fund and subscribe
         uint256 budget = bond.requiredCouponBudget();
         usdc.mint(address(this), budget + budget * 50 / 10_000);
         usdc.approve(address(bond), budget + budget * 50 / 10_000);
         bond.fundCouponBudget();
 
         address inv = address(0xCC);
-        uint256 inv_principal = 25_000e6;
-        usdc.mint(inv, inv_principal + inv_principal * 50 / 10_000);
+        uint256 principal = 25_000e6;
+        usdc.mint(inv, principal + principal * 50 / 10_000);
         vm.prank(inv);
-        usdc.approve(address(bond), inv_principal + inv_principal * 50 / 10_000);
+        usdc.approve(address(bond), principal + principal * 50 / 10_000);
         vm.prank(inv);
-        bond.deposit(inv_principal, inv_principal);
+        bond.deposit(principal, principal);
+
+        vm.warp(block.timestamp + 2);
+        bond.closeSubscription();
+    }
+
+    function test_CheckTrigger_FiresAtExactlyThreshold() public {
+        (CatBond bond, TestTriggerConfigurable trig,) = _activeBond(365 days);
+
+        vm.warp(bond.activeStart() + 10 days);
+        trig.postReport(BOND_THRESHOLD, bytes32("ref"));
+
+        assertTrue(bond.checkTrigger(), "must fire at exactly the threshold");
+        (uint256 v, uint256 reportedAt, bool triggered, uint256 checkedAt, address checkedBy) = bond.lastCheck();
+        assertEq(v, BOND_THRESHOLD);
+        assertEq(reportedAt, block.timestamp);
+        assertTrue(triggered);
+        assertEq(checkedAt, block.timestamp);
+        assertEq(checkedBy, address(this));
+    }
+
+    function test_CheckTrigger_FiresAboveThreshold() public {
+        (CatBond bond, TestTriggerConfigurable trig,) = _activeBond(365 days);
+        vm.warp(bond.activeStart() + 10 days);
+        trig.postReport(BOND_THRESHOLD + 1, bytes32(0));
+        assertTrue(bond.checkTrigger());
+    }
+
+    function test_CheckTrigger_DoesNotFireBelowThreshold() public {
+        (CatBond bond, TestTriggerConfigurable trig,) = _activeBond(365 days);
+        vm.warp(bond.activeStart() + 10 days);
+        trig.postReport(BOND_THRESHOLD - 1, bytes32(0));
+        assertFalse(bond.checkTrigger());
+    }
+
+    function test_CheckTrigger_RevertsWhenStale() public {
+        (CatBond bond, TestTriggerConfigurable trig,) = _activeBond(30 days);
+        vm.warp(bond.activeStart() + 1 days);
+        trig.postReport(BOND_THRESHOLD + 1, bytes32(0));
+
+        vm.warp(bond.activeStart() + 1 days + 30 days + 1); // just past max_report_age
+        vm.expectRevert(CatBond.StaleReport.selector);
+        bond.checkTrigger();
+    }
+
+    function test_CheckTrigger_RevertsWhenReportPredatesCommencement() public {
+        // Report BEFORE closeSubscription runs — never valid for this bond,
+        // no matter how fresh, since latestReportSince(activeStart) excludes
+        // it. Posted below threshold specifically so it doesn't also trip
+        // closeSubscription()'s separate early guard (already covered by
+        // EarlyTriggerGuardTest) — this test isolates the commencement-window
+        // check in checkTrigger() itself.
+        MockUSDC usdc = new MockUSDC();
+        TestTriggerConfigurable trig = new TestTriggerConfigurable(address(this), address(this), 365 days);
+        trig.postReport(0, bytes32(0));
+
+        CatBond bond = new CatBond(
+            address(this), address(this), address(trig), BOND_THRESHOLD, address(usdc),
+            uint16(500), 75_000e6, 25_000e6, 1, 30 days,
+            "Test Seller", "test-deal-id", new CatBond.ExposureRegion[](0)
+        );
+
+        // Must fund to reach Subscription before closeSubscription() will
+        // accept a call — no investor deposits are needed to close (the
+        // 1-second window just needs to elapse).
+        uint256 budget = bond.requiredCouponBudget();
+        usdc.mint(address(this), budget + budget * 50 / 10_000);
+        usdc.approve(address(bond), budget + budget * 50 / 10_000);
+        bond.fundCouponBudget();
 
         vm.warp(block.timestamp + 2);
         bond.closeSubscription();
 
-        // Advance into term, then report a loss that fires the trigger
+        vm.expectRevert(TriggerBase.NoReports.selector);
+        bond.checkTrigger();
+    }
+
+    function test_Settle_EndToEnd_PaysSponsorFullPrincipal() public {
+        (CatBond bond, TestTriggerConfigurable trig, MockUSDC usdc) = _activeBond(365 days);
+
         vm.warp(bond.activeStart() + 10 days);
-        trig.report(400_000_000_000, "Gallagher Re Full-Year 2026");  // $400B > $370B
+        trig.postReport(BOND_THRESHOLD + 30_000_000_000, bytes32(0)); // $400B > $370B
 
-        assertTrue(trig.isTriggered(), "trigger must be fired after report");
-
-        // settle() should transfer investor principal to sponsor
         uint256 sponsorBefore = usdc.balanceOf(address(this));
         bond.settle();
         uint256 received = usdc.balanceOf(address(this)) - sponsorBefore;
 
-        assertEq(received, inv_principal, "sponsor must receive full investor principal on settle");
+        assertEq(received, 25_000e6, "sponsor must receive full investor principal on settle");
         assertEq(uint(bond.status()), uint(CatBond.Status.Triggered), "bond must be Triggered");
     }
 }
 
-/// @dev Configurable trigger for report() tests — unlike TestTrigger (fixed limit=1),
-///      this lets each test set an arbitrary lossLimit.
-contract TestTriggerConfigurable is TriggerBase {
-    constructor(address _owner, uint256 _lossLimit, uint8 _dealType)
-        TriggerBase(_owner, _lossLimit, _dealType) {}
+// ─────────────────────────────────────────────────────────────────────────────
+// SellerInfo — sellerName/dealId read-back, verified access control
+// ─────────────────────────────────────────────────────────────────────────────
+contract SellerInfoTest is Test {
+
+    address sponsor       = address(0xA1);
+    address companyWallet = address(0xA2);
+    address investor1     = address(0xB1);
+    address stranger      = address(0xCC);
+
+    CatBond bond;
+
+    function setUp() public {
+        MockUSDC usdc = new MockUSDC();
+        TestTrigger trig = new TestTrigger(companyWallet);
+
+        CatBond.ExposureRegion[] memory exposure = new CatBond.ExposureRegion[](2);
+        exposure[0] = CatBond.ExposureRegion({region: "US", pct: 72});
+        exposure[1] = CatBond.ExposureRegion({region: "JP", pct: 28});
+
+        bond = new CatBond(
+            sponsor, companyWallet, address(trig), 1, address(usdc),
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days,
+            "Raydion", "deal-abc-123", exposure
+        );
+    }
+
+    function test_ConstructorReadBack_SellerNameAndDealId() public view {
+        assertEq(bond.sellerName(), "Raydion", "sellerName must read back exactly what was passed in");
+        assertEq(bond.dealId(), "deal-abc-123", "dealId must read back exactly what was passed in");
+    }
+
+    function test_ConstructorReadBack_Exposure() public view {
+        CatBond.ExposureRegion[] memory got = bond.getExposure();
+        assertEq(got.length, 2, "exposure must have exactly the two regions passed in");
+        assertEq(got[0].region, "US");
+        assertEq(got[0].pct, 72);
+        assertEq(got[1].region, "JP");
+        assertEq(got[1].pct, 28);
+    }
+
+    function test_Exposure_DefaultsEmptyWhenNoneProvided() public {
+        MockUSDC usdc2 = new MockUSDC();
+        TestTrigger trig2 = new TestTrigger(companyWallet);
+        CatBond noExposureBond = new CatBond(
+            sponsor, companyWallet, address(trig2), 1, address(usdc2),
+            uint16(500), 50_000e6, 25_000e6, 7 days, 30 days,
+            "Raydion", "deal-abc-123", new CatBond.ExposureRegion[](0)
+        );
+        assertEq(noExposureBond.getExposure().length, 0);
+    }
+
+    function test_Verified_DefaultsFalse() public view {
+        assertFalse(bond.verified(), "verified must default to false on a freshly deployed bond");
+    }
+
+    function test_SetVerified_CompanyWalletCanSetTrue() public {
+        vm.prank(companyWallet);
+        bond.setVerified(true);
+
+        assertTrue(bond.verified(), "verified must flip to true after setVerified(true) by companyWallet");
+    }
+
+    function test_SetVerified_CompanyWalletCanRevoke() public {
+        vm.prank(companyWallet);
+        bond.setVerified(true);
+        assertTrue(bond.verified());
+
+        vm.prank(companyWallet);
+        bond.setVerified(false);
+        assertFalse(bond.verified(), "verified must flip back to false after setVerified(false)");
+    }
+
+    function test_SetVerified_RevertsFromSponsor() public {
+        vm.prank(sponsor);
+        vm.expectRevert(CatBond.NotCompanyWallet.selector);
+        bond.setVerified(true);
+    }
+
+    function test_SetVerified_RevertsFromInvestor() public {
+        vm.prank(investor1);
+        vm.expectRevert(CatBond.NotCompanyWallet.selector);
+        bond.setVerified(true);
+    }
+
+    function test_SetVerified_RevertsFromStranger() public {
+        vm.prank(stranger);
+        vm.expectRevert(CatBond.NotCompanyWallet.selector);
+        bond.setVerified(true);
+    }
+
+    /// @dev setVerified() carries no inStatus() modifier — it must work in every
+    ///      lifecycle state, since verification is independent of bond status.
+    function test_SetVerified_WorksInAnyStatus() public {
+        assertEq(uint(bond.status()), uint(CatBond.Status.Funding));
+        vm.prank(companyWallet);
+        bond.setVerified(true);
+        assertTrue(bond.verified(), "setVerified must succeed while bond is still in Funding");
+    }
 }

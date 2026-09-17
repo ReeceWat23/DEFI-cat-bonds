@@ -47,7 +47,8 @@ contract CatBond is ReentrancyGuard {
     event PrincipalWithdrawn(address indexed investor, uint256 amount);
     event BondMatured(uint256 timestamp);
     event Settled(uint256 amountToSponsor, uint256 settlementTime);
-    event TriggerDetected(bool fired);
+    event SellerVerified(bool verified);
+    event TriggerChecked(uint256 value, uint256 reportedAt, bool triggered);
 
     // -------------------------------------------------------------------------
     // Custom errors
@@ -67,6 +68,9 @@ contract CatBond is ReentrancyGuard {
     error NotInvestor();
     error NotYetMatured();
     error ConflictOfInterest();
+    error ZeroTrigger();
+    error InvalidTrigger();
+    error StaleReport();
 
     // -------------------------------------------------------------------------
     // Immutable configuration
@@ -75,6 +79,7 @@ contract CatBond is ReentrancyGuard {
     address public immutable sponsor;
     address public immutable companyWallet;
     ITrigger public immutable trigger;
+    uint256 public immutable threshold;   // whole USD; this bond's own trigger threshold
     IERC20 public immutable usdc;
 
     uint16  public immutable couponRateBps;
@@ -85,14 +90,53 @@ contract CatBond is ReentrancyGuard {
     uint256 public immutable requiredCouponBudget;
 
     // -------------------------------------------------------------------------
+    // Seller info — deliberately minimal on-chain. Domicile, entity type,
+    // description, and loss history all live in the Bubble Deal store;
+    // dealId is the link to that record (Deal Page — Dynamic Data v2, §3.3).
+    // sellerName is a cheap, useful bit of on-chain identity; verified is
+    // set post-deploy, off-platform, by the company wallet — never at
+    // construction. Exposure is small structured data (a handful of
+    // region/percentage pairs from the build-a-bond workshop's SOV step),
+    // not a heavy file like loss history, so it lives on-chain too —
+    // finalized before "Post deal" the same way the rest of the deal terms
+    // are, and immutable for the same reason.
+    // -------------------------------------------------------------------------
+
+    string public sellerName;
+    string public dealId;
+    bool   public verified;
+
+    /// @dev Mirrors the workshop's SOV region breakdown, e.g. {region: "US", pct: 72}.
+    struct ExposureRegion {
+        string region;
+        uint16 pct;   // percentage points, 0-100
+    }
+
+    ExposureRegion[] public exposure;
+
+    // -------------------------------------------------------------------------
     // Lifecycle state
     // -------------------------------------------------------------------------
 
     Status  public status;
     uint256 public subscriptionEnd;
-    uint256 public activeStart;
+    uint256 public activeStart;   // also this bond's "commencement" — the earliest a report may date from
     uint256 public maturity;
     uint256 public settlementTime;
+
+    /// @dev Written by checkTrigger() every time it runs. `checkedBy` is
+    ///      whoever called checkTrigger() (anyone may), not necessarily the
+    ///      reporter — this is a record of when/by-whom the bond last looked,
+    ///      not who supplied the underlying report.
+    struct LastCheck {
+        uint256 value;
+        uint256 reportedAt;
+        bool    triggered;
+        uint256 checkedAt;
+        address checkedBy;
+    }
+
+    LastCheck public lastCheck;
 
     // -------------------------------------------------------------------------
     // Accounting
@@ -129,33 +173,60 @@ contract CatBond is ReentrancyGuard {
 
     /// @param _sponsor           Wallet that funds and (if triggered) receives principal.
     /// @param _companyWallet     Only address authorised to call settle() and markMatured().
-    /// @param _trigger           Address of the deployed ITrigger contract.
+    /// @param _trigger           Address of the deployed ITrigger contract. Must be non-zero
+    ///                           and must implement ITrigger — checked at deploy, see below.
+    /// @param _threshold         This bond's own trigger threshold, whole USD. Compared against
+    ///                           the trigger's reported value by checkTrigger() — the trigger
+    ///                           itself has no threshold, which is what lets multiple bonds
+    ///                           share one trigger/product at different thresholds.
     /// @param _usdc              USDC contract address.
     /// @param _couponRateBps     Flat coupon rate in basis points for the full term (e.g. 800 = 8% of principal).
     /// @param _coverageAmount    Maximum USDC principal the bond accepts (6-decimal units).
     /// @param _minInvestment     Minimum per-investor deposit (6-decimal units).
     /// @param _subscriptionDuration  Seconds the subscription window stays open after sponsor funds.
     /// @param _termDuration      Seconds from Active start to maturity.
+    /// @param _sellerName        Seller/sponsor display name (e.g. "Raydion").
+    /// @param _dealId            The web2 Deal store's record id for this bond — the bidirectional link.
+    /// @param _exposure          Region/percentage breakdown from the workshop's SOV step (e.g. [("US", 72), ("JP", 28)]).
     constructor(
         address  _sponsor,
         address  _companyWallet,
         address  _trigger,
+        uint256  _threshold,
         address  _usdc,
         uint16   _couponRateBps,
         uint256  _coverageAmount,
         uint256  _minInvestment,
         uint256  _subscriptionDuration,
-        uint256  _termDuration
+        uint256  _termDuration,
+        string memory _sellerName,
+        string memory _dealId,
+        ExposureRegion[] memory _exposure
     ) {
+        if (_trigger == address(0)) revert ZeroTrigger();
+        if (_trigger.code.length == 0) revert InvalidTrigger();
+        // A conforming ITrigger always answers reportCount(), even with zero
+        // reports posted yet — a non-conforming contract (or an EOA, caught
+        // by the code-length check above) fails to decode a return value and
+        // lands in the catch clause.
+        try ITrigger(_trigger).reportCount() returns (uint256) {} catch { revert InvalidTrigger(); }
+
         sponsor              = _sponsor;
         companyWallet        = _companyWallet;
         trigger              = ITrigger(_trigger);
+        threshold            = _threshold;
         usdc                 = IERC20(_usdc);
         couponRateBps        = _couponRateBps;
         coverageAmount       = _coverageAmount;
+        sellerName           = _sellerName;
+        dealId               = _dealId;
         minInvestment        = _minInvestment;
         subscriptionDuration = _subscriptionDuration;
         termDuration         = _termDuration;
+
+        for (uint256 i = 0; i < _exposure.length; i++) {
+            exposure.push(_exposure[i]);
+        }
 
         // Flat rate on full coverage; vesting is time-proportional during the term.
         requiredCouponBudget = _coverageAmount * _couponRateBps / BPS_DENOMINATOR;
@@ -244,7 +315,18 @@ contract CatBond is ReentrancyGuard {
     {
         bool fullySubscribed = totalDeposited >= coverageAmount;
         if (_now() < subscriptionEnd && !fullySubscribed) revert SubscriptionStillOpen();
-        if (trigger.isTriggered()) revert TriggerAlreadyFired();
+
+        // Early guard: activeStart (this bond's "commencement") isn't set
+        // yet, so checkTrigger()'s latestReportSince() window doesn't apply
+        // here. Instead, just ask whether the trigger's latest known report
+        // — regardless of when it was posted — already clears this bond's
+        // threshold. A missing report log (reportCount() == 0) is not a
+        // problem here the way it is for checkTrigger(): nothing has ever
+        // been reported, so there's nothing to guard against.
+        if (trigger.reportCount() > 0) {
+            ITrigger.Report memory r = trigger.latestReport();
+            if (r.value >= threshold) revert TriggerAlreadyFired();
+        }
 
         activeStart = _now();
         maturity    = _now() + termDuration;
@@ -295,8 +377,13 @@ contract CatBond is ReentrancyGuard {
         onlyCompanyWallet
         inStatus(Status.Active)
     {
-        if (_now() < maturity)     revert NotYetMatured();
-        if (trigger.isTriggered()) revert TriggerAlreadyFired();
+        if (_now() < maturity) revert NotYetMatured();
+        // checkTrigger() reverts if there's no valid report in window — a
+        // missed report blocks this exactly like it blocks settle(), rather
+        // than silently defaulting to "not triggered." See §2.5: the
+        // company wallet keeping reports fresh is the operational tradeoff
+        // this sprint takes on instead of paying an oracle network.
+        if (checkTrigger()) revert TriggerAlreadyFired();
 
         status = Status.Matured;
         emit BondMatured(_now());
@@ -326,7 +413,10 @@ contract CatBond is ReentrancyGuard {
         inStatus(Status.Active)
         nonReentrant
     {
-        if (!trigger.isTriggered()) revert TriggerNotFired();
+        // checkTrigger() reverts on a stale/missing report — settle()
+        // deliberately does not catch that and fall back to "not
+        // triggered." A missed report must block settlement, full stop.
+        if (!checkTrigger()) revert TriggerNotFired();
 
         settlementTime = _now();
         uint256 amount = totalDeposited;
@@ -337,20 +427,47 @@ contract CatBond is ReentrancyGuard {
         emit Settled(amount, settlementTime);
     }
 
-    /// @notice View-only: returns trigger state and current bond status.
-    function triggerStatus() external view returns (bool fired, Status currentStatus) {
-        fired         = trigger.isTriggered();
-        currentStatus = status;
+    /// @notice Returns the full exposure breakdown in one call — the auto-generated
+    ///         `exposure(uint256)` getter only returns one region at a time.
+    function getExposure() external view returns (ExposureRegion[] memory) {
+        return exposure;
     }
 
-    /// @notice Non-view companion to triggerStatus(). Emits TriggerDetected if the trigger
-    ///         has fired but the bond is not yet settled. Off-chain monitors call this
-    ///         periodically to get an on-chain event when the trigger flips.
-    function pingTrigger() external {
-        bool fired = trigger.isTriggered();
-        if (fired && status == Status.Active) {
-            emit TriggerDetected(fired);
-        }
+    /// @notice The one path by which this bond decides whether it's
+    ///         triggered. Callable by anyone (e.g. a "self-check" button on
+    ///         the bond health view, sprint plan §2.6) — reading trigger
+    ///         state costs the caller gas, not the contract, and there's no
+    ///         state it would be harmful for an outsider to refresh.
+    ///
+    ///         Reads the trigger's latest report no older than activeStart
+    ///         (this bond's commencement), reverts if none exists or if it's
+    ///         older than the trigger's own max_report_age, compares its
+    ///         value against this bond's threshold, and records the result.
+    ///         settle() and markMatured() both call this and do not catch a
+    ///         revert here — a stale or missing report blocks either path,
+    ///         never silently resolves to "not triggered."
+    function checkTrigger() public returns (bool triggeredNow) {
+        ITrigger.Report memory r = trigger.latestReportSince(activeStart);
+        if (_now() > r.reportedAt + trigger.maxReportAge()) revert StaleReport();
+
+        triggeredNow = r.value >= threshold;
+        lastCheck = LastCheck({
+            value:      r.value,
+            reportedAt: r.reportedAt,
+            triggered:  triggeredNow,
+            checkedAt:  _now(),
+            checkedBy:  msg.sender
+        });
+
+        emit TriggerChecked(r.value, r.reportedAt, triggeredNow);
+    }
+
+    /// @notice Grants or revokes the RHODEX verification stamp. Off-platform and manual —
+    ///         sponsors request it out of band; this is never a self-serve toggle. Callable
+    ///         in any lifecycle state, independent of bond status.
+    function setVerified(bool _verified) external onlyCompanyWallet {
+        verified = _verified;
+        emit SellerVerified(_verified);
     }
 
     // -------------------------------------------------------------------------

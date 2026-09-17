@@ -8,6 +8,13 @@
   }
 }
 
+/* Ghost theme pairs IBM Plex Sans (body) with IBM Plex Mono (labels,
+   numbers, eyebrows) — unscoped so any page can opt a specific element
+   into mono regardless of which theme's base --rhodex-font is active. */
+.rhodex-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
 @keyframes bar-grow {
   from { transform: scaleY(0); opacity: 0; }
   to   { transform: scaleY(1); opacity: 1; }
@@ -15,4 +22,102 @@
 
 .animate-bar-grow {
   animation: bar-grow 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── "Build a bond" workshop — scoped design system ──────────────────────────
+   Deliberately isolated from the --rhodex-* lapis theme (see Plan-it-2 doc,
+   §7): a white/hairline "clean room" look, its own font pairing, and a
+   highlight-mode toggle. Everything here is scoped under .workshop-page so
+   none of it leaks onto the rest of the app. */
+.workshop-page {
+  --wkb-surface: #FFFFFF;
+  --wkb-panel: rgba(255, 255, 255, 0.72);
+  --wkb-panel-raised: rgba(255, 255, 255, 0.92);
+  --wkb-ghost-fill: rgba(255, 255, 255, 0.45);
+  --wkb-hairline: rgba(11, 31, 91, 0.10);
+  --wkb-border-white: rgba(255, 255, 255, 0.85);
+  --wkb-ink: #141A2E;
+  --wkb-ink-muted: #5B627C;
+  --wkb-blue: #1D3FD1;
+  --wkb-blue-wash: rgba(29, 63, 209, 0.06);
+  --wkb-shadow: 0 1px 2px rgba(11, 31, 91, .04), 0 8px 24px rgba(11, 31, 91, .04);
+  --wkb-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --wkb-bg: linear-gradient(180deg, #FFFFFF 0%, #F4F6FB 100%);
+
+  background: var(--wkb-bg);
+  color: var(--wkb-ink);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.workshop-page .wkb-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.workshop-page .wkb-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Highlight-mode: a single attribute switch on the page root scopes every
+   blue rule, so components never need a highlighted/unhighlighted variant
+   of themselves — just this one selector each. */
+.workshop-page[data-highlight="on"] .wkb-highlight-text {
+  color: var(--wkb-blue);
+}
+.workshop-page[data-highlight="on"] .wkb-highlight-border {
+  border-color: var(--wkb-blue);
+}
+.workshop-page[data-highlight="on"] .wkb-highlight-fill {
+  background-color: var(--wkb-blue);
+  color: #FFFFFF;
+}
+.workshop-page[data-highlight="on"] .wkb-highlight-rule {
+  border-color: var(--wkb-blue);
+}
+.workshop-page[data-highlight="on"] .wkb-highlight-accent {
+  accent-color: var(--wkb-blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workshop-page * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Live bonds map — grid background, dots, and a small cursor-following
+   spotlight that recolors whatever's underneath it (see LiveBondsMap.jsx). */
+.workshop-page .wkb-map-grid-bg {
+  background-color: var(--wkb-surface);
+  background-image:
+    linear-gradient(rgba(29, 63, 209, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(29, 63, 209, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.workshop-page .wkb-world-map-dot {
+  fill: rgba(29, 63, 209, 0.35);
+}
+.workshop-page .wkb-map-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms var(--wkb-ease);
+  -webkit-mask-image: radial-gradient(circle 70px at var(--spot-x, 50%) var(--spot-y, 50%), black, transparent 70%);
+  mask-image: radial-gradient(circle 70px at var(--spot-x, 50%) var(--spot-y, 50%), black, transparent 70%);
+}
+.workshop-page .wkb-map-spotlight-dot {
+  fill: var(--wkb-blue);
+}
+
+/* Pastel rainbow gradient text link (Live bonds map -> Weather Lab). */
+.workshop-page .wkb-rainbow-link {
+  background: linear-gradient(90deg, #ffb3ba, #ffdfba, #ffffba, #baffc9, #bae1ff, #d7baff);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transition: background-position 600ms var(--wkb-ease);
+}
+.workshop-page .wkb-rainbow-link:hover {
+  background-position: 100% center;
 }

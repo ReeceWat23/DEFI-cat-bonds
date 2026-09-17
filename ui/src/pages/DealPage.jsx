@@ -6,10 +6,13 @@ import {
 import { injected } from 'wagmi/connectors'
 import { Link } from 'react-router-dom'
 import { isAddress } from 'viem'
-import { CATBOND_ABI, ERC20_ABI } from '../constants/abis'
-import { BrutalButton, BrutalCard, BrutalTag } from '../theme/primitives'
+import { CATBOND_ABI, TRIGGER_ABI, ERC20_ABI } from '../constants/abis'
+import { ActionButton, Surface, Tag } from '../theme/primitives'
+import { useTheme } from '../theme/ThemeProvider'
+import ThemeSwitcher from '../theme/ThemeSwitcher'
+import { TRIGGER_TYPES } from '../data/historicalLoss'
 import {
-  formatUSDC, safeParseUSDC, formatDate, formatBps,
+  formatUSDC, safeParseUSDC, formatDate, formatBps, formatAge,
   statusLabel,
 } from '../lib/utils'
 
@@ -17,44 +20,9 @@ import {
 // fill — just current-color text/border over the translucent white).
 const STATUS_TEXT_COLOR = ['#374151', '#1e40af', '#166534', '#6b21a8', '#991b1b']
 
-// ── Static deal content (DEAL 000 — Raydion) ─────────────────────────────────
-
-const SPONSOR = {
-  name:   'Raydion',
-  hq:     'Bermuda',
-  description:
-    'Raydion is a Bermuda-based specialty reinsurer providing capacity across global ' +
-    'natural catastrophe perils. With $2.4B in managed assets and over a decade ' +
-    'operating across emerging and developed markets, Raydion seeks fully collateralised ' +
-    'protection against extreme loss years that exceed their internal risk tolerance. ' +
-    'This bond covers Raydion\'s net retained exposure across their global property ' +
-    'catastrophe book.',
-}
-
-const EXPOSURE = [
-  { region: 'United States', pct: 50, color: '#3b82f6' },
-  { region: 'China',         pct: 30, color: '#f59e0b' },
-  { region: 'Brazil',        pct: 15, color: '#10b981' },
-  { region: 'European Union', pct: 5, color: '#8b5cf6' },
-]
-
-const TRIGGER_THRESHOLD_B = 370   // $B total economic nat cat losses
-const H1_INSURED_B        = 46    // $B insured losses H1 2026 (Gallagher Re — for reference)
-const H1_TOTAL_B          = 142   // $B total economic losses H1 2026 — primary trigger metric
-
-// Annual total economic losses ($B) — Gallagher Re / Swiss Re sigma
-const HISTORICAL = [
-  { year: 2016, total: 175 },
-  { year: 2017, total: 344 },
-  { year: 2018, total: 165 },
-  { year: 2019, total: 150 },
-  { year: 2020, total: 202 },
-  { year: 2021, total: 270 },
-  { year: 2022, total: 313 },
-  { year: 2023, total: 280 },
-  { year: 2024, total: 368 },
-  { year: 2025, total: 310 },
-]
+// Cycling palette for the exposure chart — the contract stores region/pct
+// pairs only, no color, so colors are assigned by position here.
+const EXPOSURE_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4']
 
 const NEWS = [
   {
@@ -62,7 +30,7 @@ const NEWS = [
     source:  'Gallagher Re',
     date:    'July 2026',
     url:     'https://www.ajg.com/gallagherre/news-and-insights/natural-catastrophe-and-climate-report-h1-2026/',
-    summary: `$${H1_INSURED_B}B in insured losses recorded through H1 2026. Atlantic hurricane season forecast remains above average with elevated La Niña conditions.`,
+    summary: 'Atlantic hurricane season forecast remains above average with elevated La Niña conditions.',
   },
   {
     title:   'Natural Catastrophe Report — Full Year 2025',
@@ -90,6 +58,8 @@ const REVERT_MESSAGES = {
   TriggerNotFired:      'The trigger has not fired.',
   TriggerAlreadyFired:  'The trigger has already fired.',
   ConflictOfInterest:   'The sponsor and company wallet cannot invest in the bond.',
+  StaleReport:          "The trigger's latest report is older than its refresh window — ask the company wallet to post a fresh one.",
+  NoReports:            'No report has been posted to this trigger since the bond went active yet.',
 }
 
 function parseError(err) {
@@ -107,15 +77,15 @@ function ConnectButton() {
   if (isConnected) return (
     <div className="flex items-center gap-3">
       <span className="text-sm font-mono text-[var(--rhodex-text-dark-muted)]">{address?.slice(0,6)}...{address?.slice(-4)}</span>
-      <BrutalButton tone="ghost" size="px-3 py-1.5 text-xs" onClick={() => disconnect()}>
+      <ActionButton tone="ghost" size="px-3 py-1.5 text-xs" onClick={() => disconnect()}>
         Disconnect
-      </BrutalButton>
+      </ActionButton>
     </div>
   )
   return (
-    <BrutalButton size="px-4 py-2 text-sm" onClick={() => connect({ connector: injected() })}>
+    <ActionButton size="px-4 py-2 text-sm" onClick={() => connect({ connector: injected() })}>
       Connect Wallet
-    </BrutalButton>
+    </ActionButton>
   )
 }
 
@@ -136,28 +106,59 @@ function TxBanner({ isWriting, isConfirming, isConfirmed, hash, error }) {
   return null
 }
 
-// ── Historical loss chart ─────────────────────────────────────────────────────
+// ── Sponsor identity logo ─────────────────────────────────────────────────────
+// Solid accent-color square, first letter of the seller name, white,
+// IBM Plex Mono, uppercase. Empty/non-alphabetic name -> blank square,
+// never a broken glyph.
 
-function HistoricalChart() {
-  const maxVal       = 420
-  const threshold    = TRIGGER_THRESHOLD_B
-  const thresholdPct = (threshold / maxVal) * 100
+function SponsorLogo({ name, size = 40 }) {
+  const letter = name && /[a-zA-Z]/.test(name.charAt(0)) ? name.charAt(0).toUpperCase() : null
+  return (
+    <div
+      className="rhodex-mono flex items-center justify-center shrink-0 rounded-[4px] font-bold text-white"
+      style={{
+        width: size, height: size,
+        backgroundColor: 'var(--rhodex-accent)',
+        fontSize: Math.round(size * 0.45),
+      }}
+    >
+      {letter}
+    </div>
+  )
+}
+
+// ── Historical loss chart ─────────────────────────────────────────────────────
+// Data-driven by the bond's own on-chain trigger type — dealType picks the
+// series and scale from TRIGGER_TYPES (shared with the /build workshop's
+// chart, same convention: illustrative until a real feed backs it).
+
+function HistoricalChart({ triggerType, thresholdB, reportedB }) {
+  if (!triggerType) return null
+  const { history, maxB } = triggerType
+  const thresholdPct = maxB ? (thresholdB / maxB) * 100 : 0
+  const reportedPct  = reportedB > 0 && maxB ? (reportedB / maxB) * 100 : null
 
   return (
     <div>
       <div className="flex items-end justify-between mb-1">
-        <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Annual total economic nat cat losses ($B)</span>
-        <span className="text-xs text-red-500 font-medium">— ${threshold}B trigger</span>
+        <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Annual {triggerType.label.toLowerCase()} ($B)</span>
+        <span className="text-xs text-red-500 font-medium">— ${thresholdB}B trigger</span>
       </div>
       <div className="relative" style={{ height: '120px' }}>
         <div
           className="absolute left-0 right-0 border-t-2 border-dashed border-red-400 z-10 pointer-events-none"
-          style={{ bottom: `${thresholdPct}%` }}
+          style={{ bottom: `${Math.min(100, thresholdPct)}%` }}
         />
+        {reportedPct !== null && (
+          <div
+            className="absolute left-0 right-0 border-t-2 border-dashed border-blue-400 z-10 pointer-events-none"
+            style={{ bottom: `${Math.min(100, reportedPct)}%` }}
+          />
+        )}
         <div className="absolute inset-0 flex items-end gap-1">
-          {HISTORICAL.map((d, i) => {
-            const heightPct = (d.total / maxVal) * 100
-            const isHigh    = d.total >= threshold
+          {history.map((d, i) => {
+            const heightPct = (d.valueB / maxB) * 100
+            const isHigh    = d.valueB >= thresholdB
             return (
               <div key={d.year} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                 <div
@@ -169,47 +170,50 @@ function HistoricalChart() {
                   }}
                 />
                 <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
-                  {d.year}: ${d.total}B
+                  {d.year}: ${d.valueB}B
                 </div>
               </div>
             )
           })}
-          {/* H1 2026 partial */}
-          <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
-            <div
-              className="w-full origin-bottom rounded-t-md border-t-2 border-dashed border-blue-400 animate-bar-grow"
-              style={{
-                height: `${(H1_TOTAL_B / maxVal) * 100}%`,
-                backgroundColor: 'rgba(191,219,254,0.55)',
-                animationDelay: `${HISTORICAL.length * 35}ms`,
-              }}
-            />
-            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-[var(--rhodex-text-dark)] text-white text-xs rounded-none px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-20">
-              H1 2026: ${H1_TOTAL_B}B (partial)
-            </div>
-          </div>
         </div>
       </div>
       <div className="flex gap-1 mt-1">
-        {HISTORICAL.map(d => (
+        {history.map(d => (
           <div key={d.year} className="flex-1 text-center text-xs text-[var(--rhodex-text-dark-muted)]">{String(d.year).slice(2)}</div>
         ))}
-        <div className="flex-1 text-center text-xs text-[var(--rhodex-accent)] font-medium">H1'26</div>
       </div>
-      <div className="mt-2 text-xs text-[var(--rhodex-text-dark-muted)]">Source: Gallagher Re · Swiss Re sigma</div>
+      {reportedB > 0 && (
+        <div className="mt-2 text-xs text-[var(--rhodex-accent)] font-medium">— ${reportedB}B latest reported</div>
+      )}
+      <div className="mt-2 text-xs text-[var(--rhodex-text-dark-muted)]">Source: Gallagher Re · Swiss Re sigma (illustrative)</div>
     </div>
   )
 }
 
 // ── Geographic exposure ───────────────────────────────────────────────────────
+// Renders the region array read straight off the contract's getExposure().
+// Under 100%, the remainder shows as an explicit "Unallocated" segment
+// rather than silently scaling the chart to fill — a gap is information.
 
-function ExposureMap() {
+function ExposureMap({ regions }) {
+  if (!regions || regions.length === 0) {
+    return (
+      <div className="rounded-[10px] border border-dashed border-[var(--rhodex-text-dark)]/20 p-6 text-center text-sm text-[var(--rhodex-text-dark-muted)]">
+        No exposure breakdown disclosed for this deal.
+      </div>
+    )
+  }
+
+  const colored = regions.map((r, i) => ({ ...r, color: EXPOSURE_PALETTE[i % EXPOSURE_PALETTE.length] }))
+  const totalPct = colored.reduce((sum, r) => sum + r.pct, 0)
+  const unallocated = Math.max(0, 100 - totalPct)
+
   return (
     <div>
       {/* Proportional area chart — each block's width (and so its area,
           since height is shared) matches its share of the portfolio. */}
       <div className="flex w-full h-36 gap-0.5 overflow-hidden border border-[var(--rhodex-text-dark)]/20">
-        {EXPOSURE.map(e => (
+        {colored.map(e => (
           <div
             key={e.region}
             title={`${e.region}: ${e.pct}%`}
@@ -224,90 +228,129 @@ function ExposureMap() {
             )}
           </div>
         ))}
+        {unallocated > 0 && (
+          <div
+            title={`Unallocated: ${unallocated}%`}
+            className="relative flex flex-col justify-end overflow-hidden p-2 bg-[var(--rhodex-text-dark)]/10"
+            style={{ width: `${unallocated}%` }}
+          >
+            {unallocated >= 10 && <span className="text-[11px] text-[var(--rhodex-text-dark-muted)]">Unallocated</span>}
+          </div>
+        )}
       </div>
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
-        {EXPOSURE.map(e => (
+        {colored.map(e => (
           <div key={e.region} className="flex items-center gap-1.5 text-xs">
             <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ backgroundColor: e.color }} />
             <span className="text-[var(--rhodex-text-dark)] font-medium">{e.region}</span>
             <span className="text-[var(--rhodex-text-dark-muted)]">{e.pct}%</span>
           </div>
         ))}
+        {unallocated > 0 && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="w-2.5 h-2.5 inline-block shrink-0 bg-[var(--rhodex-text-dark)]/10" />
+            <span className="text-[var(--rhodex-text-dark-muted)]">Unallocated</span>
+            <span className="text-[var(--rhodex-text-dark-muted)]">{unallocated}%</span>
+          </div>
+        )}
       </div>
-      <p className="text-xs text-[var(--rhodex-text-dark-muted)] pt-3">Anonymized portfolio · Gross written premium basis</p>
+      <p className="text-xs text-[var(--rhodex-text-dark-muted)] pt-3">
+        Anonymized portfolio · Gross written premium basis — this chart is the disclosure, there's no separate SOV download.
+      </p>
     </div>
   )
 }
 
 // ── Trigger status widget ─────────────────────────────────────────────────────
+// Three states, each its own visual treatment (Plan-it-2 dealpage §5.4).
+// Post-§2.4 rewrite: "triggered" is no longer a stored flag — it's the
+// bond's own lastCheck.triggered, only as fresh as the last confirmed
+// checkTrigger() call (see the Self-check button below).
+//   not_triggered — lastCheck.triggered false, or never checked yet
+//   triggered     — lastCheck.triggered true but settle() hasn't run yet
+//   settled       — bond status is Status.Triggered (settle() has run)
 
-function TriggerWidget({ bondStatus }) {
-  const triggered = Number(bondStatus) === 4
-  const pct       = Math.min(100, Math.round((H1_TOTAL_B / TRIGGER_THRESHOLD_B) * 100))
+const TRIGGER_STATE_STYLE = {
+  not_triggered: { label: 'Safe',      dot: 'bg-green-500', tag: 'border-green-600 text-green-700 bg-green-50' },
+  triggered:     { label: 'Triggered', dot: 'bg-amber-500', tag: 'border-amber-600 text-amber-700 bg-amber-50' },
+  settled:       { label: 'Settled',   dot: 'bg-red-500',   tag: 'border-red-600 text-red-700 bg-red-50' },
+}
+
+function TriggerWidget({ triggerType, thresholdB, reportedB, hasBeenChecked, lastCheckAge, likelyTriggered, onSelfCheck, canSelfCheck, isBusy, triggerState }) {
+  const pct = thresholdB > 0 ? Math.min(100, Math.round((reportedB / thresholdB) * 100)) : 0
+  const style = TRIGGER_STATE_STYLE[triggerState] ?? TRIGGER_STATE_STYLE.not_triggered
+  const unitLabel = triggerType ? `${triggerType.label}, USD` : '—'
 
   return (
-    <BrutalCard className="p-5">
+    <Surface className="p-5">
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-semibold text-[var(--rhodex-text-dark)]">Trigger Status</span>
-        {triggered ? (
-          <BrutalTag className="border-red-600 text-red-700 bg-red-50">
-            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Triggered
-          </BrutalTag>
-        ) : (
-          <BrutalTag className="border-green-600 text-green-700 bg-green-50">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Safe
-          </BrutalTag>
-        )}
+        <Tag className={style.tag}>
+          <span className={`w-2 h-2 rounded-full inline-block ${style.dot}`} /> {style.label}
+        </Tag>
       </div>
 
       <p className="text-xs text-[var(--rhodex-text-dark-muted)] mb-3 leading-relaxed">
-        Total economic nat cat losses ≥ <strong>${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026, per Gallagher Re Annual Report.
+        {triggerType ? `${triggerType.label} ≥` : 'Loss'} <strong>${thresholdB}B</strong> ({unitLabel}), per Gallagher Re report — annual aggregate.
       </p>
 
       <div className="mb-3">
         <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mb-1">
-          <span>${H1_TOTAL_B}B confirmed (H1 2026)</span>
+          <span>{reportedB > 0 ? `$${reportedB}B latest reported` : 'No report yet'}</span>
           <span>{pct}% of threshold</span>
         </div>
         <div className="w-full border border-[var(--rhodex-text-dark)]/20 bg-black/5 h-2.5">
-          <div
-            className="h-2.5 transition-all bg-[var(--rhodex-accent)]"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-2.5 transition-all bg-[var(--rhodex-accent)]" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex justify-between text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
           <span>$0</span>
-          <span>${TRIGGER_THRESHOLD_B}B</span>
+          <span>${thresholdB}B</span>
         </div>
       </div>
 
       <div className="border-t-2 border-[var(--rhodex-text-dark)]/10 pt-3 space-y-1.5">
         <div className="flex justify-between text-xs">
-          <span className="text-[var(--rhodex-text-dark-muted)]">Total economic losses H1</span>
-          <span className="font-semibold text-[var(--rhodex-text-dark)]">${H1_TOTAL_B}B</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-[var(--rhodex-text-dark-muted)]">Insured losses H1 (ref.)</span>
-          <span className="font-medium text-[var(--rhodex-text-dark-muted)]">${H1_INSURED_B}B</span>
+          <span className="text-[var(--rhodex-text-dark-muted)]">Latest reported</span>
+          <span className="font-semibold text-[var(--rhodex-text-dark)]">{reportedB > 0 ? `$${reportedB}B` : '—'}</span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-[var(--rhodex-text-dark-muted)]">Remaining to trigger</span>
-          <span className="font-semibold text-[var(--rhodex-text-dark)]">${TRIGGER_THRESHOLD_B - H1_TOTAL_B}B</span>
+          <span className="font-semibold text-[var(--rhodex-text-dark)]">{reportedB < thresholdB ? `$${thresholdB - reportedB}B` : '$0B'}</span>
         </div>
       </div>
 
       <div className="mt-3 pt-3 border-t-2 border-[var(--rhodex-text-dark)]/10 flex items-center gap-2">
         <div className="w-5 h-5 border-2 border-orange-300 bg-orange-50 flex items-center justify-center text-xs font-bold text-orange-600">G</div>
-        <a
-          href="https://www.ajg.com/gallagherre/news-and-insights/natural-catastrophe-and-climate-report-h1-2026/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-[var(--rhodex-accent)] hover:underline"
-        >
-          Gallagher Re H1 2026 Report ›
-        </a>
+        <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Verified by Gallagher Re</span>
       </div>
-    </BrutalCard>
+
+      {/* Two distinct signals — never trust the company wallet's word alone.
+          hasBeenChecked/triggerState is the bond's own on-chain-confirmed
+          answer from lastCheck; likelyTriggered is a free, unconfirmed
+          client-side comparison. Self-check lets any connected wallet pay
+          their own gas to bring lastCheck up to date — the same mechanic
+          this project verified live with an investor independently
+          confirming a trigger fired rather than trusting the sponsor. */}
+      <div className="mt-3 pt-3 border-t-2 border-[var(--rhodex-text-dark)]/10">
+        <div className="flex items-center justify-between text-xs mb-2">
+          <span className="text-[var(--rhodex-text-dark-muted)]">
+            {hasBeenChecked ? `On-chain confirmed ${lastCheckAge}` : 'Not yet confirmed on-chain'}
+          </span>
+          {likelyTriggered !== undefined && (
+            <span className={likelyTriggered ? 'text-amber-600 font-medium' : 'text-[var(--rhodex-text-dark-muted)]'}>
+              {likelyTriggered ? 'Latest report: at/above threshold' : 'Latest report: below threshold'}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onSelfCheck}
+          disabled={!canSelfCheck || isBusy}
+          className="w-full py-1.5 text-xs font-medium border-2 border-[var(--rhodex-text-dark)]/20 hover:border-[var(--rhodex-text-dark)]/40 disabled:opacity-40 transition-colors"
+        >
+          {isBusy ? 'Confirming…' : 'Self-check (checkTrigger)'}
+        </button>
+      </div>
+    </Surface>
   )
 }
 
@@ -363,23 +406,23 @@ function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, token
           </div>
           <div className="flex gap-3 items-center flex-wrap">
             {needsApprove && (
-              <BrutalButton
+              <ActionButton
                 tone="accent"
                 onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, depositTotal * 10n] }) }}
                 disabled={isBusy}
               >
                 {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
-              </BrutalButton>
+              </ActionButton>
             )}
             {approveConfirmed && (
               <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
             )}
-            <BrutalButton
+            <ActionButton
               onClick={() => { setFlow('depositing'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'deposit', args: [depositAmount, depositAmount] }) }}
               disabled={isBusy || needsApprove}
             >
               {flow === 'depositing' && isBusy ? 'Depositing…' : '② Deposit'}
-            </BrutalButton>
+            </ActionButton>
           </div>
           {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)]">Approve first, then Deposit will unlock.</p>}
         </>
@@ -420,23 +463,23 @@ function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeC
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         {needsApprove && (
-          <BrutalButton
+          <ActionButton
             tone="accent"
             onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, budgetWithFee * 10n] }) }}
             disabled={isBusy}
           >
             {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
-          </BrutalButton>
+          </ActionButton>
         )}
         {approveConfirmed && (
           <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
         )}
-        <BrutalButton
+        <ActionButton
           onClick={() => { setFlow('funding'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'fundCouponBudget' }) }}
           disabled={isBusy || needsApprove}
         >
           {flow === 'funding' && isBusy ? 'Funding…' : '② Fund Coupon Budget'}
-        </BrutalButton>
+        </ActionButton>
       </div>
       {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-2">Approve first so the bond contract can pull the coupon budget.</p>}
     </div>
@@ -445,9 +488,13 @@ function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeC
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-const INPUT_CLASS = 'border-2 border-[var(--rhodex-text-dark)] bg-white rounded-none focus:outline-none focus:ring-2 focus:ring-[var(--rhodex-accent)]'
+const INPUT_CLASS = {
+  lapis: 'border-2 border-[var(--rhodex-text-dark)] bg-white rounded-none focus:outline-none focus:ring-2 focus:ring-[var(--rhodex-accent)]',
+  ghost: 'border border-[var(--rhodex-hairline)] bg-transparent rounded-[8px] focus:outline-none focus:ring-1 focus:ring-[var(--rhodex-accent)]',
+}
 
 export default function DealPage() {
+  const { themeId } = useTheme()
   const { address, isConnected } = useAccount()
   const [bondInput,   setBondInput]   = useState('')
   const [bondAddress, setBondAddress] = useState(null)
@@ -474,6 +521,12 @@ export default function DealPage() {
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'settlementTime' },
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'totalDeposited' },
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'termDuration' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'trigger' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'threshold' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'lastCheck' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'sellerName' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'verified' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'getExposure' },
     ] : [],
   })
 
@@ -481,7 +534,33 @@ export default function DealPage() {
     status, sponsor, companyWallet, usdcAddr,
     couponRateBps, coverageAmount, minInvestment, requiredCouponBudget,
     subscriptionEnd, maturity, settlementTime, totalDeposited, termDuration,
+    triggerAddr, bondThreshold, lastCheck, sellerName, verified, exposureRaw,
   ] = bondData?.map(r => r.result) ?? []
+
+  const [, , lastCheckTriggered, lastCheckAt] = lastCheck ?? []
+
+  const exposureRegions = (exposureRaw ?? []).map(r => ({ region: r.region, pct: Number(r.pct) }))
+
+  // ── Trigger contract reads — the trigger is now an append-only report log
+  // (§2.4), not a triggered flag. reportCount/latestReport/productConfig
+  // replace dealType/lossLimit/reportedValue/reportedSource/isTriggered —
+  // same source AdminPage's ManageSection reads. ──
+  const { data: triggerData, refetch: refetchTrigger } = useReadContracts({
+    contracts: triggerAddr ? [
+      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'reportCount' },
+      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'latestReport' },
+      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'productConfig' },
+    ] : [],
+  })
+  const [reportCount, latestReport, productConfig] = triggerData?.map(r => r.result) ?? []
+  // latestReport() has a single Report-struct output, so viem decodes it as
+  // a named object ({value, reportedAt, ...}), not an array like the
+  // multi-output productConfig()/lastCheck() below — read fields by name.
+  const latestValue = latestReport?.value
+  const latestReportedAt = latestReport?.reportedAt
+  const [, , valuePath] = productConfig ?? []
+  const hasReports = reportCount !== undefined && Number(reportCount) > 0
+  const hasBeenChecked = lastCheckAt !== undefined && Number(lastCheckAt) > 0
 
   const { data: userData, refetch: refetchUser } = useReadContracts({
     contracts: bondAddress && address && usdcAddr ? [
@@ -498,12 +577,12 @@ export default function DealPage() {
   const { writeContract, isPending: isWriting, data: txHash, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash })
 
-  useEffect(() => { if (isConfirmed) { refetchBond(); refetchUser() } }, [isConfirmed])
+  useEffect(() => { if (isConfirmed) { refetchBond(); refetchUser(); refetchTrigger() } }, [isConfirmed])
 
   useEffect(() => {
     const s = Number(status ?? 0)
     if (s !== 1 && s !== 2) return
-    const id = setInterval(() => { refetchBond(); refetchUser() }, 15_000)
+    const id = setInterval(() => { refetchBond(); refetchUser(); refetchTrigger() }, 15_000)
     return () => clearInterval(id)
   }, [status])
 
@@ -513,6 +592,27 @@ export default function DealPage() {
   const now        = BigInt(Math.floor(Date.now() / 1000))
   const isSponsor  = !!address && !!sponsor  && address.toLowerCase() === sponsor.toLowerCase()
   const isCompany  = !!address && !!companyWallet && address.toLowerCase() === companyWallet.toLowerCase()
+
+  // Trigger type + threshold — threshold now lives on the bond (§2.5), not
+  // the trigger; dealType is gone entirely, replaced by matching the
+  // trigger's productConfig.valuePath back against TRIGGER_TYPES. Both are
+  // stored as whole USD on-chain (e.g. 370_000_000_000 = $370B); divide to
+  // the $B scale the chart/copy work in.
+  const triggerType  = valuePath !== undefined
+    ? Object.values(TRIGGER_TYPES).find(t => t.valuePath === valuePath)
+    : undefined
+  const thresholdB   = bondThreshold ? Number(bondThreshold) / 1e9 : 0
+  const reportedB    = hasReports ? Number(latestValue) / 1e9 : 0
+
+  // Two distinct signals, not collapsed into one (§2.6 audit, TESTING.md):
+  // `triggerState` is the on-chain CONFIRMED answer from the bond's own
+  // lastCheck — only as fresh as the last time anyone paid gas to call
+  // checkTrigger(). `likelyTriggered` is a free, client-side comparison of
+  // the latest report against the threshold, for display only.
+  const likelyTriggered = hasReports && bondThreshold !== undefined ? latestValue >= bondThreshold : undefined
+  const triggerState = statusNum === 4
+    ? 'settled'
+    : (hasBeenChecked && lastCheckTriggered ? 'triggered' : 'not_triggered')
 
   const pctFilled = coverageAmount && coverageAmount > 0n
     ? Math.min(100, Number((totalDeposited ?? 0n) * 100n / coverageAmount))
@@ -545,7 +645,7 @@ export default function DealPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen font-mono text-[var(--rhodex-text-dark)]">
+    <div className="min-h-screen text-[var(--rhodex-text-dark)]" style={{ fontFamily: 'var(--rhodex-font)' }}>
       {/* Fixed full-viewport gradient layer — keeps the gradient visually
           consistent as the (much taller than one screen) deal page scrolls,
           instead of the gradient stretching thin across the whole content
@@ -559,9 +659,10 @@ export default function DealPage() {
             <h1 className="text-lg font-bold tracking-tight text-[var(--rhodex-text-dark)]">
               RHODEX.
             </h1>
-            <BrutalTag className="translate-y-[3px] border-orange-400 bg-transparent text-orange-600 shadow-[0_0_6px_1px_rgba(249,115,22,0.6)]">Testnet</BrutalTag>
+            <Tag className="translate-y-[3px] border-orange-400 bg-transparent text-orange-600 shadow-[0_0_6px_1px_rgba(249,115,22,0.6)]">Testnet</Tag>
           </div>
           <div className="flex items-center gap-5">
+            <ThemeSwitcher />
             <Link to="/admin" className="text-sm text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] transition-colors">Admin ›</Link>
             <ConnectButton />
           </div>
@@ -574,7 +675,7 @@ export default function DealPage() {
             grid the content below uses (a fixed max-width drifts out of
             sync with column 1's actual fluid width at narrower viewports). */}
         <div className="grid lg:grid-cols-3 gap-5">
-          <BrutalCard rounded="rounded-[10px]" className="lg:col-span-2 flex items-center gap-3 px-4 py-2">
+          <Surface rounded="rounded-[10px]" className="lg:col-span-2 flex items-center gap-3 px-4 py-2">
             <input
               type="text"
               value={bondInput}
@@ -583,10 +684,10 @@ export default function DealPage() {
               placeholder="Paste CatBond contract address to load deal…"
               className="flex-1 min-w-0 bg-transparent font-mono text-sm text-[var(--rhodex-text-dark)] placeholder:text-[var(--rhodex-text-dark-muted)] outline-none"
             />
-            <BrutalButton size="px-3 py-1.5 text-xs" onClick={loadBond}>
+            <ActionButton size="px-3 py-1.5 text-xs" onClick={loadBond}>
               Load
-            </BrutalButton>
-          </BrutalCard>
+            </ActionButton>
+          </Surface>
         </div>
 
         {/* Tx banner — spans full width */}
@@ -601,13 +702,15 @@ export default function DealPage() {
               {/* ── Section 1: deal hero (funding overview) + historical chart ──
                   60% white fill (vs. the 45% default) so the border pops
                   a bit more against the page gradient. */}
-              <BrutalCard rounded="rounded-[12px]" className="p-6" style={{ backgroundColor: 'rgba(255,255,255,0.6)' }}>
+              <Surface rounded="rounded-[12px]" className="p-6" style={{ backgroundColor: 'rgba(255,255,255,0.6)' }}>
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div>
                     <p className="text-xs font-medium text-[var(--rhodex-text-dark-muted)] uppercase tracking-wide mb-1">
-                      Sponsor · {SPONSOR.name}, {SPONSOR.hq}
+                      Sponsor · {sellerName || 'Unnamed sponsor'}
                     </p>
-                    <h2 className="text-xl font-bold text-[var(--rhodex-text-dark)] mb-3">Global Natural Catastrophe Loss 2026</h2>
+                    <h2 className="text-xl font-bold text-[var(--rhodex-text-dark)] mb-3">
+                      {triggerType ? triggerType.label : 'Loss'} {new Date().getFullYear()}
+                    </h2>
 
                     {/* Trigger condition, verified by the data-source oracle */}
                     <div className="flex items-center gap-6">
@@ -621,8 +724,8 @@ export default function DealPage() {
                         />
                       </div>
                       <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed">
-                        If total economic natural catastrophe losses exceed{' '}
-                        <strong className="text-[var(--rhodex-text-dark)]">${TRIGGER_THRESHOLD_B}B</strong> for calendar year 2026, this deal triggers.
+                        If {triggerType ? triggerType.label.toLowerCase() : 'loss'} exceeds{' '}
+                        <strong className="text-[var(--rhodex-text-dark)]">${thresholdB}B</strong> (annual aggregate), this deal triggers.
                       </p>
                     </div>
                   </div>
@@ -652,20 +755,20 @@ export default function DealPage() {
 
                 <div className="mt-[80px]">
                   <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Historical Insured Losses vs Trigger</h3>
-                  <HistoricalChart />
+                  <HistoricalChart triggerType={triggerType} thresholdB={thresholdB} reportedB={reportedB} />
                 </div>
-              </BrutalCard>
+              </Surface>
 
               {/* ── Section 2: Investment layer / action card ───────────────
                   Internal look stays as-is for now — an "options set" style
                   pass is planned separately. */}
-              <BrutalCard rounded="rounded-[12px]" className="p-6">
+              <Surface rounded="rounded-[12px]" className="p-6">
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="font-semibold text-[var(--rhodex-text-dark)]">Investment Layer</h3>
                   <span className="text-xs text-[var(--rhodex-text-dark-muted)]">Layer 1 of 1</span>
                 </div>
                 <p className="text-xs text-[var(--rhodex-text-dark-muted)] mb-5">
-                  Insured losses ≥ ${TRIGGER_THRESHOLD_B}B · {formatUSDC(coverageAmount)} coverage · {formatBps(couponRateBps)} coupon · {termDays}-day term
+                  {triggerType ? triggerType.label : 'Loss'} ≥ ${thresholdB}B · {formatUSDC(coverageAmount)} coverage · {formatBps(couponRateBps)} coupon · {termDays}-day term
                 </p>
 
                 {/* Phase 0: Funding */}
@@ -713,7 +816,7 @@ export default function DealPage() {
                           value={depositInput}
                           onChange={e => setDepositInput(e.target.value)}
                           placeholder={`Min ${formatUSDC(minInvestment)}`}
-                          className={`w-full sm:w-64 px-4 py-2.5 text-sm ${INPUT_CLASS}`}
+                          className={`w-full sm:w-64 px-4 py-2.5 text-sm ${INPUT_CLASS[themeId] ?? INPUT_CLASS.lapis}`}
                         />
                         {depositAmount > 0n && (
                           <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
@@ -739,9 +842,9 @@ export default function DealPage() {
                         {/* Close subscription — anyone can call once full or expired */}
                         {(fullySubscribed || (subscriptionEnd && now >= subscriptionEnd)) && (
                           <div className="mt-5 pt-5 border-t-2 border-[var(--rhodex-text-dark)]/10">
-                            <BrutalButton size="px-4 py-2 text-sm" onClick={() => write('closeSubscription')} disabled={isBusy}>
+                            <ActionButton size="px-4 py-2 text-sm" onClick={() => write('closeSubscription')} disabled={isBusy}>
                               Close Subscription &amp; Activate Bond
-                            </BrutalButton>
+                            </ActionButton>
                             <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
                               {fullySubscribed
                                 ? 'Coverage fully subscribed — no need to wait for the window to expire.'
@@ -782,33 +885,31 @@ export default function DealPage() {
                     <span>Trigger fired. Principal transferred to sponsor at settlement.</span>
                   </div>
                 )}
-              </BrutalCard>
+              </Surface>
 
               {/* ── Section 3: seller info + exposure + deal details ────────
-                  Company-specific info first, then exposure, then details. */}
-              <BrutalCard rounded="rounded-[12px]" className="p-6">
+                  Company-specific info first, then exposure, then details.
+                  No SOV download — the exposure chart below is the
+                  disclosure; there's nothing else to hand out. */}
+              <Surface rounded="rounded-[12px]" className="p-6">
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 border-2 border-[var(--rhodex-text-dark)] bg-[var(--rhodex-accent)] flex items-center justify-center text-white font-bold text-lg">R</div>
-                  <div>
-                    <div className="font-semibold text-[var(--rhodex-text-dark)]">{SPONSOR.name}</div>
-                    <div className="text-xs text-[var(--rhodex-text-dark-muted)]">{SPONSOR.hq} · Specialty Reinsurer</div>
+                  <SponsorLogo name={sellerName} size={40} />
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold text-[var(--rhodex-text-dark)]">{sellerName || 'Unnamed sponsor'}</div>
+                    {verified && (
+                      <span title="Verified by RHODEX" className="text-[var(--rhodex-accent)] font-bold">✚</span>
+                    )}
                   </div>
                 </div>
-                <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4">{SPONSOR.description}</p>
-                <BrutalButton
-                  tone="ghost"
-                  size="px-4 py-2 text-sm"
-                  disabled
-                  title="Document upload coming soon"
-                >
-                  ↓ Statement of Values (SOV)
-                </BrutalButton>
+                <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4 italic">
+                  Description not yet available.
+                </p>
 
-                <div className="mt-6 pt-6 border-t-2 border-[var(--rhodex-text-dark)]/10">
-                  <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4">Portfolio Exposure</h3>
-                  <ExposureMap />
+                <div className="pt-2 border-t-2 border-[var(--rhodex-text-dark)]/10">
+                  <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-4 mt-4">Portfolio Exposure</h3>
+                  <ExposureMap regions={exposureRegions} />
                 </div>
-              </BrutalCard>
+              </Surface>
 
             </div>
 
@@ -817,9 +918,16 @@ export default function DealPage() {
 
               {/* Your position — only when invested */}
               {isConnected && principalOf !== undefined && principalOf > 0n && (
-                <BrutalCard className="p-5">
+                <Surface className="p-5">
                   <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-1">Your Position</h3>
-                  <div className="text-3xl font-bold text-[var(--rhodex-text-dark)] mb-0.5">{formatUSDC(principalOf)}</div>
+                  {/* Ghost theme: green on the number only — value the viewer
+                      owns. Lapis is untouched (not part of this redesign). */}
+                  <div
+                    className="text-3xl font-bold mb-0.5 tabular-nums"
+                    style={{ color: themeId === 'ghost' ? 'var(--rhodex-green)' : 'var(--rhodex-text-dark)' }}
+                  >
+                    {formatUSDC(principalOf)}
+                  </div>
                   <div className="text-xs text-[var(--rhodex-text-dark-muted)] mb-4">Principal deposited</div>
 
                   {/* Coupon progress bar */}
@@ -856,17 +964,18 @@ export default function DealPage() {
                     </div>
                   </div>
 
-                  {/* Coupon claim — Active or Triggered */}
+                  {/* Coupon claim — Active or Triggered. success tone: this is
+                      value the investor can take, same as Withdraw below. */}
                   {(statusNum === 2 || statusNum === 4) && (
-                    <BrutalButton size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy} className="mb-2">
+                    <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy} className="mb-2">
                       Claim Coupon
-                    </BrutalButton>
+                    </ActionButton>
                   )}
 
                   {/* Withdraw principal — Matured */}
                   {statusNum === 3 && (
                     <>
-                      <BrutalButton
+                      <ActionButton
                         tone="success"
                         size="w-full py-2.5 text-sm"
                         onClick={() => write('withdrawPrincipal')}
@@ -874,28 +983,41 @@ export default function DealPage() {
                         className="mb-2"
                       >
                         {principalWithdrawn ? 'Principal Withdrawn ✓' : 'Withdraw Principal'}
-                      </BrutalButton>
-                      <BrutalButton size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy}>
+                      </ActionButton>
+                      <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy}>
                         Claim Remaining Coupon
-                      </BrutalButton>
+                      </ActionButton>
                     </>
                   )}
-                </BrutalCard>
+                </Surface>
               )}
 
               {/* Connect prompt when not connected */}
               {!isConnected && (
-                <BrutalCard className="p-5 text-center">
+                <Surface className="p-5 text-center">
                   <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-3">Connect your wallet to see your position.</p>
                   <ConnectButton />
-                </BrutalCard>
+                </Surface>
               )}
 
               {/* Trigger status */}
-              {bondAddress && <TriggerWidget bondStatus={status} />}
+              {bondAddress && (
+                <TriggerWidget
+                  triggerType={triggerType}
+                  thresholdB={thresholdB}
+                  reportedB={reportedB}
+                  hasBeenChecked={hasBeenChecked}
+                  lastCheckAge={formatAge(lastCheckAt)}
+                  likelyTriggered={likelyTriggered}
+                  triggerState={triggerState}
+                  canSelfCheck={isConnected && statusNum >= 2}
+                  isBusy={isBusy}
+                  onSelfCheck={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'checkTrigger' })}
+                />
+              )}
 
               {/* Related news */}
-              <BrutalCard className="p-5">
+              <Surface className="p-5">
                 <h3 className="font-semibold text-[var(--rhodex-text-dark)] mb-3">Related Reports</h3>
                 <div className="space-y-4">
                   {NEWS.map((n, i) => (
@@ -912,11 +1034,11 @@ export default function DealPage() {
                     </div>
                   ))}
                 </div>
-              </BrutalCard>
+              </Surface>
 
               {/* Refresh */}
               <div className="text-center">
-                <button onClick={() => { refetchBond(); refetchUser() }} className="text-xs text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] underline">
+                <button onClick={() => { refetchBond(); refetchUser(); refetchTrigger() }} className="text-xs text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] underline">
                   Refresh data
                 </button>
               </div>

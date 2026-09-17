@@ -61,6 +61,7 @@ POST + `Authorization: Bearer <RHODEX_API_KEY>`.
 | `link-bond` | Attach the deployed contract address | `{"bond-id": ..., "contract": ...}` | Returns `{"response": {"verification": "<address>"}}` |
 | `update-bond-status` | Advance lifecycle status | `{"bond-id": ..., "status-code": 0\|1\|2}` | 0 ok, 1 triggered, 2 matured |
 | `get_bond` | Read a bond record back | `{"bond-id": ...}` | Returns `{"response": {"bond": {...}}}`; unknown id → `{"bond": {}}`, not an error |
+| `get_bonds` | List every bond of a trigger type | `{"type": "natcat"}` | Returns `{"response": {"bonds": [...]}}`. `"natcat"` covers both economic-loss and industry-loss deals (one product, two metrics) |
 
 Bond object (`bonds.build_bond_payload`) — every field is always sent,
 even empty ones (see "Bubble param auto-detection" below for why):
@@ -94,6 +95,22 @@ whatever keys are in that body. It doesn't run the workflow or touch any
 data. `bonds.initialize_endpoint()` does this; all four bonds endpoints
 are already initialized as of 2026-08-20, so this normally doesn't need
 re-running — only if a new field gets added to the bond object later.
+
+## Admin UI live data (dev server)
+
+The admin page's "live bonds" map (`ui/src/components/build-bond/LiveBondsMap.jsx`)
+needs bond data in the browser, and the browser must never call Bubble
+directly (the API key is server-side only). `server.py` is the minimal
+local dev server that closes that gap:
+
+```bash
+python3 server.py   # http://localhost:5001, GET /bonds?type=natcat
+```
+
+Run this alongside `npm run dev` (in `ui/`) whenever you want the map's
+stats to show real data — without it, the map still renders, just with
+"Live bonds unavailable" instead of numbers. Dev-only: wide-open CORS,
+Flask's built-in server, no auth — not something to deploy anywhere.
 
 ## Fake end-to-end flow
 

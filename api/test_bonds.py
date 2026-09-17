@@ -26,11 +26,24 @@ def test_build_bond_payload_includes_all_fields_even_when_unset():
     assert set(payload.keys()) == {
         "cedant", "contract-address", "description", "Loss-history",
         "maturity", "SOV", "status-tiggered", "value",
+        "trigger-address", "product-id", "product-version",
     }
     # Fields not passed in stay present, just empty — not omitted.
     assert payload["contract-address"] == ""
     assert payload["Loss-history"] == ""
     assert payload["SOV"] == ""
+    assert payload["trigger-address"] == ""
+    assert payload["product-id"] == ""
+    assert payload["product-version"] == 0
+
+
+def test_build_bond_payload_honors_trigger_fields():
+    payload = bonds.build_bond_payload(
+        trigger_address="0xTrig", product_id="natcat_loss", product_version=1,
+    )
+    assert payload["trigger-address"] == "0xTrig"
+    assert payload["product-id"] == "natcat_loss"
+    assert payload["product-version"] == 1
 
 
 def test_build_bond_payload_defaults_status_to_ok():
@@ -66,6 +79,19 @@ def test_extract_unique_id_returns_none_when_absent():
 
 def test_extract_unique_id_handles_missing_response_key():
     assert bonds.extract_unique_id({"status": "success"}) is None
+
+
+@pytest.mark.parametrize("response, expected", [
+    ({"response": {"bonds": [{"cedant": "Acme"}]}}, [{"cedant": "Acme"}]),
+    ({"bonds": [{"cedant": "Acme"}]}, [{"cedant": "Acme"}]),
+    ({"response": {"results": [{"cedant": "Acme"}]}}, [{"cedant": "Acme"}]),
+])
+def test_extract_bonds_finds_known_field_names(response, expected):
+    assert bonds.extract_bonds(response) == expected
+
+
+def test_extract_bonds_returns_empty_list_when_absent():
+    assert bonds.extract_bonds({"response": {"status": "success"}}) == []
 
 
 # ── Integration tests — hit the live API ─────────────────────────────────────
@@ -130,6 +156,18 @@ def test_get_bond_on_unknown_id_returns_empty_not_an_error():
     resp = bonds.get_bond("this-id-does-not-exist-" + secrets.token_hex(4))
     assert resp.get("status") == "success"
     assert resp.get("response", {}).get("bond") == {}
+
+
+def test_list_bonds_natcat_returns_bonds_with_expected_shape():
+    resp = bonds.list_bonds("natcat")
+    assert resp.get("status") == "success"
+    result = bonds.extract_bonds(resp)
+    assert isinstance(result, list)
+    assert len(result) > 0, "expected at least one live natcat bond to already exist"
+    for bond in result:
+        assert "cedant" in bond
+        assert "contract-address" in bond
+        assert "status-triggered" in bond
 
 
 def test_full_lifecycle_end_to_end():
