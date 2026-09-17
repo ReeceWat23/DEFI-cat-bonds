@@ -522,3 +522,25 @@ for the full pre-sprint audit and results.
   still tracks correctly against the new coordinate space (mask-image
   radius is in rendered pixels, independent of the SVG's internal
   viewBox units, so this needed no changes — just verification).
+
+### 2026-09-17 — First push to GitHub + Vercel prep
+- Pushed the entire sprint (this whole file's history to date) to
+  `origin/master` in one commit — nothing had been committed since
+  `4067cfc`. Excluded (and gitignored) three loose reference-material
+  paths from repo root (`files 1/`, `rhodex-home-nextjs.zip`,
+  `rhodexv2full/`) — the source material the `/v2` homepage was ported
+  from, not app code.
+- **Vercel groundwork**: added `ui/vercel.json` (SPA rewrite — without
+  it, only `/` would work on a static deploy; every other route 404s on
+  direct load/refresh). Root Directory still needs setting to `ui` in
+  the Vercel dashboard itself (not file-configurable).
+- Decided against a public "invest in a fake bond" flow for this pass:
+  raw anvil can't be reached by anyone outside the machine running it
+  (not a permissions issue — `localhost` is local by definition, and
+  anvil's state is in-memory/ephemeral besides), and a real public
+  testnet deploy needs a funded wallet signing real transactions, which
+  isn't something to script unattended. Parked until that's ready.
+- **`/` now serves the v2 homepage** (`HomePageV2`) instead of the
+  original lapis-themed one, which moved to `/v1`. This is the "show
+  people the high level" scope for the public deploy — `/deal`,
+  `/admin`, `/build` are unchanged and still reachable directly.
