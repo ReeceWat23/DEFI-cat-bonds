@@ -1,7 +1,10 @@
 /* Section 0 — opens on the cyclone. 150vh pinned.
    Static values = opening keyframe; GSAP drives to the strike keyframe. */
 .stage { position: relative; height: 100vh; overflow: hidden; isolation: isolate; }
-.layer { position: absolute; inset: 0; }
+/* Purely decorative — pointer-events: none so these full-bleed layers can
+   never intercept clicks on the fixed header sitting above the stage,
+   regardless of how ScrollTrigger's pin ends up ordering stacking contexts. */
+.layer { position: absolute; inset: 0; pointer-events: none; }
 
 /* Same light gradient as the rest of the page — no separate dark storm
    field. var(--field-*) come from .rhodex-v2's scope (v2.css), same as
@@ -42,7 +45,7 @@
    multiply instead of the old screen blend, which just washed out to white. */
 .flash { background: var(--navy); opacity: 0; mix-blend-mode: multiply; }
 
-.bolt { position: absolute; left: 60%; top: 0; height: 58%; width: 14vmin; transform: translateX(-38%); opacity: 0; }
+.bolt { position: absolute; left: 60%; top: 0; height: 58%; width: 14vmin; transform: translateX(-38%); opacity: 0; pointer-events: none; }
 .bolt polyline { fill: none; stroke: var(--navy); stroke-width: 1.5; stroke-linejoin: miter;
   stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 6px rgba(45,66,116,.5)); }
 .origin { position: absolute; left: 60%; top: 58%; width: 0; height: 0; }
@@ -59,8 +62,11 @@
 .btnSolid { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* Second line resolves at 70%. */
+/* pointer-events: none — this is plain animated text (words fade in via
+   opacity, never a link), but its box overlaps the .intro CTA buttons
+   above it and was silently eating their clicks despite being invisible. */
 .headline { position: absolute; left: 6vw; right: 6vw; bottom: 14vh; color: var(--navy); font-weight: 300;
-  font-size: clamp(30px, 5.2vw, 72px); line-height: 1.12; letter-spacing: -.015em; max-width: 16ch; }
+  font-size: clamp(30px, 5.2vw, 72px); line-height: 1.12; letter-spacing: -.015em; max-width: 16ch; pointer-events: none; }
 .word { display: inline-block; opacity: 0; transform: translateY(.25em); margin-right: .28em; }
 .hint { position: absolute; left: 6vw; bottom: 26px; color: var(--navy); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .7; }
 
