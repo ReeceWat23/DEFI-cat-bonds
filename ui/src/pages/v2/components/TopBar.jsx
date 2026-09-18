@@ -9,9 +9,14 @@ export default function TopBar() {
       style={{ color: 'var(--topbar-ink, var(--ink))', transition: 'color .4s' }}
     >
       <Link to="/" className="font-mono text-[15px] font-semibold tracking-wide">RHODEX.</Link>
-      <Link to="/deal" className="rounded-md bg-navy px-3 py-1.5 font-mono text-[11px] font-medium text-white">
-        Get started
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link to="/build" className="rounded-md px-3 py-1.5 font-mono text-[11px] font-medium">
+          Build a bond
+        </Link>
+        <Link to="/build" className="rounded-md bg-navy px-3 py-1.5 font-mono text-[11px] font-medium text-white">
+          Get started
+        </Link>
+      </div>
     </header>
   )
 }

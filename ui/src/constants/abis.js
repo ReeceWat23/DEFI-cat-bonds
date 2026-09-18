@@ -37,6 +37,14 @@ export const TESTNET_USDC = {
   'Arbitrum Sepolia': '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
 }
 
+// The RDX test token from `DEAL 000/script/Setup.s.sol`, deployed against
+// the currently-running local anvil (chain id 31337). Unlike the testnet
+// presets above, this address only works while that specific anvil process
+// is alive — a fresh `run.sh` or a restarted anvil deploys RDX to a new
+// address (deterministic per-anvil, but not stable across restarts), so
+// update this after re-running the fixture. ANVIL/LOCAL ONLY.
+export const LOCAL_RDX_TOKEN = '0x8a791620dd6260079bf849dc5567adc3f2fdc318'
+
 // One canonical, already-deployed public trigger per deal type — reported
 // to by the company wallet, shared by every public bond of that type,
 // rather than every "Post deal" deploying (and needing to independently
@@ -45,11 +53,15 @@ export const TESTNET_USDC = {
 // existing Deal Type dropdown already *is* trigger selection — no registry
 // enumerating "every trigger ever deployed" is needed for that.
 //
-// TESTNET/ANVIL ONLY — these are local chain-id-31337 addresses, deployed
-// live during this session (DEAL 000/script/Setup.s.sol:Deal000Trigger,
-// natcat_loss v2). Redeploy and replace before any real network launch,
-// the same way RHODEX_COMPANY_WALLET above is a placeholder to replace.
+// TESTNET/ANVIL ONLY — these are local chain-id-31337 addresses. Like
+// LOCAL_RDX_TOKEN above, these only resolve while the specific anvil
+// process they were deployed against stays alive — anvil restarts wipe
+// state, so a dead "InvalidTrigger()" revert on Post deal almost always
+// means these are stale and need redeploying (DEAL 000/script/Setup.s.sol,
+// TRIGGER_TYPE=1 for economic / 0 for industry) and pasting back in here.
+// Redeploy and replace before any real network launch, the same way
+// RHODEX_COMPANY_WALLET above is a placeholder to replace.
 export const CANONICAL_TRIGGERS = {
-  economic: '0x593C66DBf77348920DA8C2c47d23390781a53656',
-  industry: '0xC8615da9d2511b7B6fD0C07DFdC52005cA26ECEE',
+  economic: '0x4A679253410272dd5232B3Ff7cF5dbB88f295319',
+  industry: '0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1',
 }

@@ -4,7 +4,7 @@ import { useAccount, useConnect, useDisconnect, useDeployContract, useWaitForTra
 import { injected } from 'wagmi/connectors'
 import { isAddress } from 'viem'
 import { FilledButton, GhostButton, Panel } from './primitives'
-import { CATBOND_ABI, CATBOND_BYTECODE, TESTNET_USDC, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
+import { CATBOND_ABI, CATBOND_BYTECODE, TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
 import { REGIONS } from '../../data/regionTaxonomy'
 import { TRIGGER_TYPES } from '../../data/historicalLoss'
 import { parseUSDC, formatUSDC, daysToSeconds } from '../../lib/utils'
@@ -80,6 +80,7 @@ export default function ReviewSection({ state, network }) {
   useEffect(() => {
     if (bondConfirmed && bondReceipt?.contractAddress) {
       const addr = bondReceipt.contractAddress
+      console.log('[postDeal] confirmed, contract deployed at', addr, bondReceipt)
       setBondAddr(addr)
       localStorage.setItem('catbond_address', addr)
       localStorage.setItem('catbond_trigger', triggerAddr)
@@ -87,28 +88,46 @@ export default function ReviewSection({ state, network }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bondConfirmed, bondReceipt])
 
+  // Diagnostic: log every state change in the deploy pipeline so a stuck
+  // "Post deal" click is visible in the console instead of just idling.
+  // Flattened to a template string (not a raw object) so it survives a
+  // copy-paste out of a collapsed devtools console.
+  useEffect(() => {
+    console.log(
+      `[postDeal] state pending=${bondPending} confirming=${bondConfirming} confirmed=${bondConfirmed} ` +
+      `txHash=${bondTxHash ?? 'none'} error=${bondError ? (bondError.shortMessage || bondError.message) : 'none'}`
+    )
+  }, [bondPending, bondConfirming, bondConfirmed, bondTxHash, bondError])
+
   if (!layer) {
     return <p className="text-sm text-[var(--wkb-ink-muted)]">Confirm a layer in Section 01 to review your deal.</p>
   }
 
   function postDeal() {
-    deployBond({
-      abi: CATBOND_ABI,
-      bytecode: CATBOND_BYTECODE,
-      args: [
-        address, RHODEX_COMPANY_WALLET, triggerAddr,
-        BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
-        usdcAddr,
-        Math.round(layer.coupon * 100),
-        parseUSDC(String(layer.raise)),
-        parseUSDC(String(MIN_INVESTMENT_USD)),
-        daysToSeconds(SUBSCRIPTION_DAYS),
-        daysToSeconds(TERM_DAYS),
-        guessSellerName(state.disclosure.website),
-        '',
-        state.disclosure.sov.regions.map(r => ({ region: r.country, pct: r.exposurePct })),
-      ],
-    })
+    const args = [
+      address, RHODEX_COMPANY_WALLET, triggerAddr,
+      BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
+      usdcAddr,
+      Math.round(layer.coupon * 100),
+      parseUSDC(String(layer.raise)),
+      parseUSDC(String(MIN_INVESTMENT_USD)),
+      daysToSeconds(SUBSCRIPTION_DAYS),
+      daysToSeconds(TERM_DAYS),
+      guessSellerName(state.disclosure.website),
+      '',
+      state.disclosure.sov.regions.map(r => ({ region: r.country, pct: r.exposurePct })),
+    ]
+    console.log(
+      `[postDeal] clicked canPost=${canPost} isConnected=${isConnected} address=${address} ` +
+      `usdcAddr=${usdcAddr} triggerAddr=${triggerAddr} isBusy=${isBusy} bondAddr=${bondAddr}`
+    )
+    console.log('[postDeal] args', args.map(a => typeof a === 'bigint' ? a.toString() + 'n' : JSON.stringify(a)).join(', '))
+    try {
+      deployBond({ abi: CATBOND_ABI, bytecode: CATBOND_BYTECODE, args })
+      console.log('[postDeal] deployContract() called, waiting on wallet…')
+    } catch (e) {
+      console.error('[postDeal] deployContract() threw synchronously', e?.shortMessage || e?.message || e)
+    }
   }
 
   const currencyLabel = network === 'mainnet' ? 'USDC' : 'RDX'
@@ -194,10 +213,17 @@ export default function ReviewSection({ state, network }) {
             className="rounded-[8px] border border-[var(--wkb-hairline)] bg-transparent px-2 py-2 text-xs text-[var(--wkb-ink-muted)] disabled:opacity-50"
           >
             <option value="" disabled>Testnet preset</option>
+            <option value={LOCAL_RDX_TOKEN}>Local (Anvil RDX)</option>
             {Object.entries(TESTNET_USDC).map(([name, addr]) => <option key={addr} value={addr}>{name}</option>)}
           </select>
         </div>
 
+        {!usdcAddr && (
+          <p className="text-xs text-red-600 mb-3">Pick a {currencyLabel} address above — "Post deal" won't do anything until it's set.</p>
+        )}
+        {usdcAddr && !isAddress(usdcAddr) && (
+          <p className="text-xs text-red-600 mb-3">That doesn't look like a valid address.</p>
+        )}
         {!triggerAddr && (
           <p className="text-xs text-red-600 mb-3">No canonical trigger configured for this deal type yet.</p>
         )}

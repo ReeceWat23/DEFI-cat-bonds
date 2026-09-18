@@ -74,7 +74,7 @@ export default function Hero() {
         <p className={s.tagline}>Tech for ILS brokers</p>
         <div className={s.cta}>
           <a className={`${s.btn} ${s.btnSolid}`} href="#s1">Explore the system</a>
-          <a className={s.btn} href="#s1">Read the thesis</a>
+          <a className={s.btn} href="https://docs.google.com/document/d/1A0rYhz8nv4eEgBBOcgn56HJHrfZqVprxSobjufy8250/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Read the thesis</a>
         </div>
       </div>
       <h2 className={s.headline}>
