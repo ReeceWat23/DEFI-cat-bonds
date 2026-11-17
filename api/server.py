@@ -1,15 +1,32 @@
 """
-Minimal local dev server — the one exception to "the browser never calls
-Bubble directly" (see bonds.py, natcat_loss.py): this process is the
-server-side hop that rule requires. It holds RHODEX_API_KEY, calls Bubble,
-and hands the admin UI back plain JSON. Nothing else lives here yet.
+Minimal local dev server — the server-side hop for "the browser never
+talks to the bond store directly" (see bonds_supabase.py, natcat_loss.py).
+It holds the Supabase service-role key, reads/writes public.rpos, and
+hands the UI back plain JSON. (Bond store moved from Bubble to Supabase
+2026-11-17; the old Bubble client is still in bonds.py for reference.)
 
 Dev-only. Not deployed anywhere; run it alongside the Vite dev server:
 
     python3 api/server.py
 
 Endpoints:
-  GET /bonds?type=natcat   -> list_bonds(type), extracted to a plain array.
+  GET  /bonds?type=natcat  -> list_bonds(type), extracted to a plain array.
+  GET  /bonds/<deal_id>    -> get_bond(deal_id), extracted to the bare bond
+                               record. What DealPage.jsx calls to show a
+                               posted deal's description — it reads dealId
+                               straight off the deployed CatBond (a public
+                               getter) and looks the record up from there,
+                               no localStorage/param plumbing needed.
+  POST /bonds              -> create_bond(), the "Build a bond" workshop's
+                               web2 half of Post deal. Body: {cedant,
+                               description, maturity, value}. Returns
+                               {"dealId": "..."}. Mirrors deploy_deal.py's
+                               step 1 (create draft record -> dealId), just
+                               reached from the browser instead of a script.
+  POST /bonds/link         -> link_contract_address(), step 3 of the same
+                               handshake — attach the now-deployed contract
+                               address back onto the bond record. Body:
+                               {dealId, contractAddress}.
 
 CORS is wide open (Access-Control-Allow-Origin: *) because this never
 runs anywhere but localhost during development — tighten this before any
@@ -17,9 +34,10 @@ real deployment, the same "replace before launch" caveat as
 CANONICAL_TRIGGERS/RHODEX_COMPANY_WALLET in the UI.
 """
 
+import requests
 from flask import Flask, jsonify, request
 
-import bonds
+import bonds_supabase as bonds
 
 app = Flask(__name__)
 
@@ -27,17 +45,67 @@ app = Flask(__name__)
 @app.after_request
 def _allow_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
+
+
+@app.errorhandler(EnvironmentError)
+def _missing_config(e):
+    return jsonify({"error": str(e)}), 500
+
+
+@app.errorhandler(requests.HTTPError)
+def _store_error(e):
+    return jsonify({"error": str(e)}), 502
 
 
 @app.get("/bonds")
 def get_bonds():
-    bond_type = request.args.get("type", "natcat")
+    return jsonify(bonds.list_bonds(request.args.get("type", bonds.DEFAULT_TRIGGER_TYPE)))
+
+
+@app.get("/bonds/<deal_id>")
+def get_bond_by_id(deal_id):
+    if not deal_id.isdigit():
+        # Pre-migration deals carry a Bubble-style id on-chain; those records
+        # don't exist in Supabase.
+        return jsonify({"error": "bond not found"}), 404
     try:
-        resp = bonds.list_bonds(bond_type)
-    except EnvironmentError as e:
-        return jsonify({"error": str(e)}), 500
-    return jsonify(bonds.extract_bonds(resp))
+        return jsonify(bonds.get_bond(deal_id))
+    except bonds.BondNotFound:
+        return jsonify({"error": "bond not found"}), 404
+
+
+@app.post("/bonds")
+def create_bond():
+    body = request.get_json(force=True, silent=True) or {}
+    payload = bonds.build_bond_payload(
+        cedant=body.get("cedant", ""),
+        description=body.get("description", ""),
+        maturity=body.get("maturity", ""),
+        value=body.get("value", 0),
+        trigger_address=body.get("triggerAddress", ""),
+        product_id=body.get("productId", ""),
+        product_version=body.get("productVersion"),
+    )
+    row = bonds.create_bond(payload)
+    # CatBond.dealId is a string on-chain.
+    return jsonify({"dealId": str(row["id"])})
+
+
+@app.post("/bonds/link")
+def link_bond():
+    body = request.get_json(force=True, silent=True) or {}
+    deal_id = str(body.get("dealId") or "")
+    contract_address = body.get("contractAddress")
+    if not deal_id.isdigit() or not contract_address:
+        return jsonify({"error": "numeric dealId and contractAddress are required"}), 400
+    try:
+        row = bonds.link_contract_address(deal_id, contract_address)
+    except bonds.BondNotFound:
+        return jsonify({"error": "bond not found"}), 404
+    return jsonify({"ok": True, "bond": row})
 
 
 if __name__ == "__main__":

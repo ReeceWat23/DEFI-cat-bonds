@@ -39,7 +39,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-import bonds  # noqa: E402
+import bonds_supabase as bonds  # noqa: E402
 
 DEAL_000_DIR = os.path.join(os.path.dirname(__file__), "..", "DEAL 000")
 RPC_URL = "http://127.0.0.1:8545"
@@ -103,10 +103,7 @@ def main():
         maturity=fixture["maturity"],
         value=fixture["value"],
     )
-    create_resp = bonds.create_bond(payload)
-    deal_id = bonds.extract_unique_id(create_resp)
-    if not deal_id:
-        raise SystemExit(f"create_bond didn't return a usable id: {create_resp}")
+    deal_id = str(bonds.create_bond(payload)["id"])  # CatBond.dealId is a string
     print(f"dealId: {deal_id}")
 
     print("\n── 2. Deploy CatBond with dealId embedded ───────────────")
@@ -118,7 +115,7 @@ def main():
 
     print("\n── 4. Link address back onto the bond record (web2) ─────")
     link_resp = bonds.link_contract_address(deal_id, bond_address)
-    print(json.dumps(link_resp, indent=2))
+    print(json.dumps(link_resp, indent=2, default=str))
 
     print("\n── 5. Verify: read the deployed contract back ───────────")
     onchain_deal_id = cast_call_string(bond_address, "dealId()(string)")
