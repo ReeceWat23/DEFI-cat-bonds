@@ -62,6 +62,6 @@ export const LOCAL_RDX_TOKEN = '0x8a791620dd6260079bf849dc5567adc3f2fdc318'
 // Redeploy and replace before any real network launch, the same way
 // RHODEX_COMPANY_WALLET above is a placeholder to replace.
 export const CANONICAL_TRIGGERS = {
-  economic: '0x4A679253410272dd5232B3Ff7cF5dbB88f295319',
-  industry: '0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1',
+  economic: '0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1',
+  industry: '0x4A679253410272dd5232B3Ff7cF5dbB88f295319',
 }

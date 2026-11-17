@@ -15,13 +15,10 @@ const SUBSCRIPTION_DAYS = 7   // window investors have to deposit
 const TERM_DAYS = 365          // §9 Q4 — yearly only
 const MIN_INVESTMENT_USD = 1000
 
-// CatBond's constructor now takes sellerName/dealId (Deal Page — Dynamic
-// Data v2). The workshop doesn't collect a structured company name yet
-// (only a website), so this derives one the same way DisclosureSection's
-// description generator does. dealId stays empty — the live workshop
-// doesn't create a web2 Deal record yet (that's api/deploy_deal.py's job
-// for the DEAL 000 fixture path); wiring this flow to the bonds API is
-// separate, larger work, not done here.
+// CatBond's constructor takes sellerName/dealId (Deal Page — Dynamic Data
+// v2). The workshop doesn't collect a structured company name yet (only a
+// website), so this derives one the same way DisclosureSection's
+// description generator does.
 function guessSellerName(website) {
   try {
     const host = new URL(website.startsWith('http') ? website : `https://${website}`).hostname
@@ -30,6 +27,35 @@ function guessSellerName(website) {
   } catch {
     return 'Sponsor'
   }
+}
+
+// Local Flask dev server (api/server.py) — the one sanctioned hop between
+// the browser and Bubble. Mirrors api/deploy_deal.py's two-write handshake
+// (create draft record -> dealId -> deploy on-chain with it embedded ->
+// link the deployed address back) but reached from the browser instead of
+// a script.
+const BONDS_API = 'http://localhost:5001/bonds'
+
+function estimateMaturityDate() {
+  const days = SUBSCRIPTION_DAYS + TERM_DAYS
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+async function createBubbleRecord({ website, description, raise }) {
+  const res = await fetch(BONDS_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cedant: guessSellerName(website),
+      description,
+      maturity: estimateMaturityDate(),
+      value: raise,
+    }),
+  })
+  if (!res.ok) throw new Error(`Bubble create-bond failed (${res.status})`)
+  const data = await res.json()
+  if (!data.dealId) throw new Error(data.error || 'Bubble did not return a bond id')
+  return data.dealId
 }
 
 function ConnectButton() {
@@ -76,34 +102,56 @@ export default function ReviewSection({ state, network }) {
     useWaitForTransactionReceipt({ hash: bondTxHash })
 
   const [bondAddr, setBondAddr] = useState(null)
+  const [dealId, setDealId] = useState(null)
+  const [creatingBond, setCreatingBond] = useState(false)
+  const [bubbleError, setBubbleError] = useState(null)
 
   useEffect(() => {
     if (bondConfirmed && bondReceipt?.contractAddress) {
       const addr = bondReceipt.contractAddress
-      console.log('[postDeal] confirmed, contract deployed at', addr, bondReceipt)
       setBondAddr(addr)
       localStorage.setItem('catbond_address', addr)
       localStorage.setItem('catbond_trigger', triggerAddr)
+      // Step 3 of the handshake — link the now-deployed address back onto
+      // the Bubble record. Fire-and-forget: the on-chain deploy already
+      // succeeded and carries dealId itself, so a failed link here doesn't
+      // block the UI, just logs — the record stays creatable/linkable by
+      // hand later via bonds.link_contract_address(dealId, addr).
+      if (dealId) {
+        fetch(`${BONDS_API}/link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dealId, contractAddress: addr }),
+        }).catch(e => console.error('[postDeal] link-bond failed', e))
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bondConfirmed, bondReceipt])
-
-  // Diagnostic: log every state change in the deploy pipeline so a stuck
-  // "Post deal" click is visible in the console instead of just idling.
-  // Flattened to a template string (not a raw object) so it survives a
-  // copy-paste out of a collapsed devtools console.
-  useEffect(() => {
-    console.log(
-      `[postDeal] state pending=${bondPending} confirming=${bondConfirming} confirmed=${bondConfirmed} ` +
-      `txHash=${bondTxHash ?? 'none'} error=${bondError ? (bondError.shortMessage || bondError.message) : 'none'}`
-    )
-  }, [bondPending, bondConfirming, bondConfirmed, bondTxHash, bondError])
 
   if (!layer) {
     return <p className="text-sm text-[var(--wkb-ink-muted)]">Confirm a layer in Section 01 to review your deal.</p>
   }
 
-  function postDeal() {
+  async function postDeal() {
+    setBubbleError(null)
+    setCreatingBond(true)
+    // Bubble's schema (api/bonds.py) has no separate loss-history field with
+    // upload support yet — fold it into the one free-text field that does
+    // round-trip, rather than silently dropping what the sponsor typed.
+    const summary = state.disclosure.description.edited || state.disclosure.description.generated
+    const lossHistory = state.disclosure.lossHistory.trim()
+    const description = lossHistory ? `${summary}\n\nLoss history: ${lossHistory}` : summary
+    let newDealId
+    try {
+      newDealId = await createBubbleRecord({ website: state.disclosure.website, description, raise: layer.raise })
+    } catch (e) {
+      setCreatingBond(false)
+      setBubbleError(e.message || String(e))
+      return // don't deploy on-chain without a web2 record to link it to
+    }
+    setDealId(newDealId)
+    setCreatingBond(false)
+
     const args = [
       address, RHODEX_COMPANY_WALLET, triggerAddr,
       BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
@@ -114,25 +162,15 @@ export default function ReviewSection({ state, network }) {
       daysToSeconds(SUBSCRIPTION_DAYS),
       daysToSeconds(TERM_DAYS),
       guessSellerName(state.disclosure.website),
-      '',
+      newDealId,
       state.disclosure.sov.regions.map(r => ({ region: r.country, pct: r.exposurePct })),
     ]
-    console.log(
-      `[postDeal] clicked canPost=${canPost} isConnected=${isConnected} address=${address} ` +
-      `usdcAddr=${usdcAddr} triggerAddr=${triggerAddr} isBusy=${isBusy} bondAddr=${bondAddr}`
-    )
-    console.log('[postDeal] args', args.map(a => typeof a === 'bigint' ? a.toString() + 'n' : JSON.stringify(a)).join(', '))
-    try {
-      deployBond({ abi: CATBOND_ABI, bytecode: CATBOND_BYTECODE, args })
-      console.log('[postDeal] deployContract() called, waiting on wallet…')
-    } catch (e) {
-      console.error('[postDeal] deployContract() threw synchronously', e?.shortMessage || e?.message || e)
-    }
+    deployBond({ abi: CATBOND_ABI, bytecode: CATBOND_BYTECODE, args })
   }
 
   const currencyLabel = network === 'mainnet' ? 'USDC' : 'RDX'
   const listingFee = Math.round(layer.raise * 0.0005)
-  const isBusy = bondPending || bondConfirming
+  const isBusy = bondPending || bondConfirming || creatingBond
   const canPost = isConnected && isAddress(usdcAddr) && !!triggerAddr && !isBusy && !bondAddr
   const error = bondError
 
@@ -227,7 +265,14 @@ export default function ReviewSection({ state, network }) {
         {!triggerAddr && (
           <p className="text-xs text-red-600 mb-3">No canonical trigger configured for this deal type yet.</p>
         )}
+        {bubbleError && (
+          <p className="text-xs text-red-600 mb-3">
+            Couldn't create the deal record ({bubbleError}) — make sure the local API server is
+            running (<code className="wkb-mono">python3 api/server.py</code>). Nothing was deployed.
+          </p>
+        )}
         {error && <p className="text-xs text-red-600 mb-3">{error.shortMessage || error.message}</p>}
+        {creatingBond && <p className="text-xs text-[var(--wkb-ink-muted)] mb-3">Creating deal record…</p>}
         {bondPending && <p className="text-xs text-[var(--wkb-ink-muted)] mb-3">Confirm the deployment in your wallet…</p>}
         {bondConfirming && <p className="text-xs text-[var(--wkb-ink-muted)] mb-3">Deploying…</p>}
 

@@ -527,6 +527,7 @@ export default function DealPage() {
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'sellerName' },
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'verified' },
       { address: bondAddress, abi: CATBOND_ABI, functionName: 'getExposure' },
+      { address: bondAddress, abi: CATBOND_ABI, functionName: 'dealId' },
     ] : [],
   })
 
@@ -535,7 +536,26 @@ export default function DealPage() {
     couponRateBps, coverageAmount, minInvestment, requiredCouponBudget,
     subscriptionEnd, maturity, settlementTime, totalDeposited, termDuration,
     triggerAddr, bondThreshold, lastCheck, sellerName, verified, exposureRaw,
+    dealId,
   ] = bondData?.map(r => r.result) ?? []
+
+  // The workshop's Post deal embeds dealId on-chain (Deal Page — Dynamic
+  // Data v2, §3.3); an empty string means this bond predates that wiring
+  // or was posted through a path that never created a web2 record (see
+  // deploy_deal.py vs. the manual-deploy CLI path). Fetched through the
+  // local Flask server (api/server.py) — the browser never calls Bubble
+  // directly, same rule as LiveBondsMap's bonds list.
+  const [bubbleBond, setBubbleBond] = useState(null)
+  useEffect(() => {
+    setBubbleBond(null)
+    if (!dealId) return
+    let cancelled = false
+    fetch(`http://localhost:5001/bonds/${dealId}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!cancelled) setBubbleBond(data) })
+      .catch(() => { if (!cancelled) setBubbleBond(null) })
+    return () => { cancelled = true }
+  }, [dealId])
 
   const [, , lastCheckTriggered, lastCheckAt] = lastCheck ?? []
 
@@ -901,8 +921,8 @@ export default function DealPage() {
                     )}
                   </div>
                 </div>
-                <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4 italic">
-                  Description not yet available.
+                <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4 whitespace-pre-line">
+                  {bubbleBond?.description || <span className="italic">Description not yet available.</span>}
                 </p>
 
                 <div className="pt-2 border-t-2 border-[var(--rhodex-text-dark)]/10">
