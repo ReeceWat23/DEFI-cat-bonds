@@ -72,16 +72,14 @@ contract Setup is Script {
         uint256 thresholdB  = vm.envOr("LOSS_THRESHOLD_B", uint256(370));
         uint256 threshold   = thresholdB * 1_000_000_000;
 
-        // Snapshotted from api/products/public/natcat_loss.v2.json — see
+        // Snapshotted from api/products/public/natcat_loss.v3.json — see
         // that file and api/products/README.md's "one endpoint, multiple
         // metrics" design. dealType selects which of the product's two
-        // metrics this trigger reports on; the string below is just that
-        // metric's primary (full-year total) field for on-chain
-        // identification — the monitor resolves the real value off-chain
-        // with a total→quarterly fallback chain (v2's value_paths).
+        // metrics this trigger reports on. The total→quarterly fallback
+        // now happens inside the Supabase natcat_latest view.
         string memory valuePath = dealType == 1
-            ? "response.reports.\"economic-loss | total\""
-            : "response.reports.\"industry-loss | total\"";
+            ? "[0].economic_loss_b"
+            : "[0].industry_loss_b";
         uint256 maxReportAge = 150 days; // matches the product's max_report_age (150 days)
 
         vm.startBroadcast();
@@ -107,11 +105,11 @@ contract Setup is Script {
             COMPANY,
             COMPANY,
             "natcat_loss",
-            2,
+            3,
             valuePath,
             "usd_billions",
             maxReportAge,
-            "https://realestatesimplified.xyz/version-test/api/1.1/wf/latest-report"
+            "https://nqldthhutpfxpxnqqxsk.supabase.co/rest/v1/natcat_latest"
         );
 
         // Canonical Raydion exposure breakdown (Plan-it-2 dealpage doc §4.1),

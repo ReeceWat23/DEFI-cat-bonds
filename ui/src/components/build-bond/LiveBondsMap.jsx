@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useReadContracts } from 'wagmi'
 import { TRIGGER_ABI, CANONICAL_TRIGGERS } from '../../constants/abis'
-import { NATCAT_LOSS_PRODUCT } from '../../data/historicalLoss'
 import { formatUSDWhole, formatAge } from '../../lib/utils'
 import DOTS from '../../data/worldDots.json'
 
@@ -121,19 +120,18 @@ export default function LiveBondsMap() {
 
         {/* Latest report — bottom-right ghost container */}
         <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6">
-          <a
-            href={NATCAT_LOSS_PRODUCT.endpoint}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--wkb-hairline)] px-3 py-1.5 text-xs font-medium hover:border-[var(--wkb-blue)] transition-colors"
+          {/* Not a link: the report source (Supabase natcat_latest) needs
+              the server-side key, so there's nothing for the browser to open. */}
+          <div
+            className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--wkb-hairline)] px-3 py-1.5 text-xs font-medium"
             style={{ background: 'var(--wkb-panel-raised)', color: 'var(--wkb-blue)' }}
           >
             {latest ? (
-              <>Latest report: {formatUSDWhole(latest[0])} ({formatAge(latest[1])}) →</>
+              <>Latest report: {formatUSDWhole(latest[0])} ({formatAge(latest[1])})</>
             ) : (
-              <>Latest report →</>
+              <>Latest report: —</>
             )}
-          </a>
+          </div>
         </div>
       </div>
 

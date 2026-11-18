@@ -91,7 +91,7 @@ contract CatBond is ReentrancyGuard {
 
     // -------------------------------------------------------------------------
     // Seller info — deliberately minimal on-chain. Domicile, entity type,
-    // description, and loss history all live in the Bubble Deal store;
+    // description, and loss history all live in the off-chain deal store (Supabase rpos);
     // dealId is the link to that record (Deal Page — Dynamic Data v2, §3.3).
     // sellerName is a cheap, useful bit of on-chain identity; verified is
     // set post-deploy, off-platform, by the company wallet — never at

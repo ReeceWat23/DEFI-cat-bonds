@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-17/18 — Backend moved from Bubble to Supabase
+
+- **Bonds** (`public.rpos`, migration `20261117000000_rpos_cleanup_snake_case.sql`):
+  snake_case columns, status/uniqueness/non-negative guardrails, document
+  paths in a private `rpo-documents` bucket instead of file columns, plus
+  `product_version`, `trigger_type` and `updated_at`. `api/bonds.py` is now
+  the Supabase client (same function names, plain rows, bigint ids passed
+  on-chain as strings). `server.py` and `deploy_deal.py` use it unchanged
+  from the UI's point of view.
+- **NatCat loss data** (`public.natcat` + view `natcat_latest`, migration
+  `20261118000000_natcat_reports.sql`): one row per published report
+  (year + Q1/Q2/Q3/FY), a generated `gap_b`, and a new `metadata` jsonb
+  column for extra report detail such as regional distribution. All 15
+  Bubble reports (2022 FY to 2026 Q2) were copied across and checked
+  against Bubble's export.
+- **Trigger product `natcat_loss` v3**: polls `natcat_latest` via a new
+  optional `auth_scheme: "supabase"`. v2 (Bubble) is deprecated. Setup.s.sol
+  and the Admin page's trigger deploy (`historicalLoss.js`) now snapshot v3.
+  Existing v2 triggers keep reading Bubble until they're redeployed.
+- **Removed the Bubble clients**: old `bonds.py`, `natcat_loss.py`,
+  `validate.sh` and their tests. The UI's "Latest report" label on the live
+  bonds map is no longer a link, since the endpoint needs the server key.
+
 ## Unreleased — Sprint: Deployed Triggers as Source of Truth
 
 Sprint spec: `api/it3_plan_triggers_n_mgmnt.md`. Working rules require a

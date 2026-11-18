@@ -1,19 +1,25 @@
-# RHODEX APIs
+# RHODEX API
 
-Python clients for the RHODEX-hosted APIs (Bubble backend at
-`realestatesimplified.xyz`, staging/"version-test" environment). Two
-independent APIs live here:
+Server-side Python for RHODEX's off-chain data, backed by Supabase
+(project `nqldthhutpfxpxnqqxsk`). Moved off Bubble 2026-11-17/18.
 
-- **`natcat_loss.py`** — real historical + current-year natural catastrophe
-  loss data (economic and industry loss, per year and per quarter), sourced
-  from Gallagher Re reports. Read-only.
-- **`bonds.py`** — the off-chain bond record lifecycle: create a bond,
-  link it to its on-chain contract address once deployed, update its
-  status as it triggers/matures, and read it back.
+- **`bonds.py`** is the off-chain bond record lifecycle (table `public.rpos`).
+  It creates a bond, links it to its deployed CatBond address, updates its
+  status as it triggers or matures, and reads it back.
+- **`natcat_store.py`** handles NatCat loss reports (table `public.natcat`,
+  view `public.natcat_latest`). These are economic and insured (industry)
+  loss per year and quarter, sourced from Gallagher Re, and they're what
+  triggers settle on.
+- **`server.py`** is the local dev server the UI calls. The browser never
+  talks to Supabase directly.
+- **`products/`, `monitor/`, `report_trigger.py`** form the trigger pipeline.
+  A product describes a data source, the monitor polls it, and
+  `report_trigger.py` posts the latest value on-chain.
+- **`deploy_deal.py`** runs the full posting handshake: create a record,
+  deploy a CatBond with its `dealId`, link the address back, and verify.
 
-Both are real, live APIs — there is no mock/staging double for either.
-Running the tests here creates real (throwaway) records in the bonds
-database and makes real calls against the NatCat feed.
+Schema lives in `../supabase/migrations/`. Apply new migrations in the
+Supabase dashboard's SQL Editor.
 
 ## Setup
 
@@ -21,12 +27,15 @@ database and makes real calls against the NatCat feed.
 pip install -r requirements.txt
 ```
 
-Requires `RHODEX_API_KEY` in a `.env` file at the repo root (bearer token,
-shared by both APIs):
+`.env` at the repo root:
 
 ```
-RHODEX_API_KEY=...
+SUPABASE_URL=https://nqldthhutpfxpxnqqxsk.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...   # sb_secret_... or legacy service_role JWT
 ```
+
+The key bypasses row-level security, so keep it server-side only. Both tables
+have RLS on with no policies, so the publishable key can't read them.
 
 ## Running the tests
 
@@ -34,91 +43,57 @@ RHODEX_API_KEY=...
 ./run_tests.sh
 ```
 
-Runs `validate.sh` (NatCat Loss endpoint checks) and `test_bonds.py`
-(pytest — unit tests for the pure helpers, plus live integration tests for
-the full bonds lifecycle) back to back, with a combined pass/fail summary.
+Live tests run when the Supabase keys are set, and skip otherwise. The bonds
+live test creates one throwaway `rpos` row and deletes it. The NatCat live
+test is read-only: it checks that `natcat_latest` agrees with the raw table.
 
-Run them individually:
+## Bonds (`public.rpos`)
 
-```bash
-./validate.sh                    # NatCat Loss API only
-python3 -m pytest test_bonds.py -v   # Bonds API only
-```
+| Function | Does |
+|---|---|
+| `build_bond_payload(...)` | Builds a row. Blank strings become NULL. `trigger_type` defaults to `natcat` |
+| `create_bond(row)` | Inserts, returns the row with its new `id` |
+| `link_contract_address(id, address)` | Sets `contract_address` (unique) |
+| `update_bond_status(id, code)` | `status_triggered`: 0 ok, 1 triggered, 2 matured |
+| `get_bond(id)` | Returns one row, raises `BondNotFound` if missing |
+| `list_bonds(type)` | Every bond with that `trigger_type`, newest first |
 
-If `RHODEX_API_KEY` isn't set, `test_bonds.py`'s integration tests skip
-cleanly rather than failing (the unit tests still run — they don't touch
-the network).
+The bond `id` is a bigint. `CatBond.dealId` is a string on-chain, so pass
+`str(id)`. Documents (loss history, SOV) go in the private `rpo-documents`
+Storage bucket, and the row stores their paths.
 
-## Bonds API — endpoints
+## NatCat reports (`public.natcat`)
 
-All four are Bubble API workflows under
-`https://realestatesimplified.xyz/version-test/api/1.1/wf/<endpoint>`,
-POST + `Authorization: Bearer <RHODEX_API_KEY>`.
+There's one row per published report, keyed by `(year, period)`. `period` is
+`Q1`, `Q2`, `Q3` or `FY`. Quarterly figures are cumulative year-to-date, as
+published. Figures are in $B, so multiply by 1e9 for on-chain values.
 
-| Endpoint | Purpose | Body | Notes |
-|---|---|---|---|
-| `mkr_bond` | Create a bond record | full bond object (see below) | Returns `{"response": {"id": "..."}}` |
-| `link-bond` | Attach the deployed contract address | `{"bond-id": ..., "contract": ...}` | Returns `{"response": {"verification": "<address>"}}` |
-| `update-bond-status` | Advance lifecycle status | `{"bond-id": ..., "status-code": 0\|1\|2}` | 0 ok, 1 triggered, 2 matured |
-| `get_bond` | Read a bond record back | `{"bond-id": ...}` | Returns `{"response": {"bond": {...}}}`; unknown id → `{"bond": {}}`, not an error |
-| `get_bonds` | List every bond of a trigger type | `{"type": "natcat"}` | Returns `{"response": {"bonds": [...]}}`. `"natcat"` covers both economic-loss and industry-loss deals (one product, two metrics) |
+- `economic_loss_b` and `industry_loss_b` are each nullable, since a report
+  may publish only one of them. `gap_b` is generated from the two.
+- `source_url` and `as_of` record where the figure came from and when.
+- `metadata` (jsonb object) holds extra report detail, e.g.
+  `{"regional_distribution": {"US": {"economic_loss_b": 80, "industry_loss_b": 30}}}`.
 
-Bond object (`bonds.build_bond_payload`) — every field is always sent,
-even empty ones (see "Bubble param auto-detection" below for why):
+To add or revise a report, insert it in the Table Editor, or call
+`natcat_store.upsert_reports([natcat_store.build_report(2026, "Q3", ...)])`.
+Upsert updates the row in place when `(year, period)` already exists.
 
-```
-{
-  "cedant":            string,   # sponsor / ceding company name
-  "contract-address":  string,   # set later via link-bond — "" at creation
-  "description":       string,
-  "Loss-history":      file,     # no upload implemented — plain string placeholder
-  "maturity":          date,     # ISO 8601 on write, comes back as epoch-ms on read
-  "SOV":               file,     # same as Loss-history
-  "status-tiggered":   number,   # write-side field name (the API's own typo)
-  "value":             number,   # USD
-}
-```
+`natcat_latest` is what product `natcat_loss` v3 polls. It takes the newest
+year, and for each metric the latest period in that year that has a figure
+(FY, then Q3, Q2, Q1).
 
-Two read-vs-write quirks worth knowing, both documented at the top of
-`bonds.py`: the status field reads back correctly spelled as
-`status-triggered` even though the write param is `status-tiggered`; and
-`maturity` reads back as a Bubble-internal epoch-ms timestamp rather than
-the ISO date string you sent.
-
-### Bubble param auto-detection ("initialize")
-
-A Bubble API workflow with no manually-declared parameters 400s with
-`Missing parameter for workflow <name>: parameter <name>` until it's been
-initialized once — `POST <endpoint>/initialize` with a *complete* sample
-payload registers the parameter names/types in the Bubble editor from
-whatever keys are in that body. It doesn't run the workflow or touch any
-data. `bonds.initialize_endpoint()` does this; all four bonds endpoints
-are already initialized as of 2026-08-20, so this normally doesn't need
-re-running — only if a new field gets added to the bond object later.
-
-## Admin UI live data (dev server)
-
-The admin page's "live bonds" map (`ui/src/components/build-bond/LiveBondsMap.jsx`)
-needs bond data in the browser, and the browser must never call Bubble
-directly (the API key is server-side only). `server.py` is the minimal
-local dev server that closes that gap:
+## Dev server
 
 ```bash
-python3 server.py   # http://localhost:5001, GET /bonds?type=natcat
+python3 server.py   # http://localhost:5001
 ```
 
-Run this alongside `npm run dev` (in `ui/`) whenever you want the map's
-stats to show real data — without it, the map still renders, just with
-"Live bonds unavailable" instead of numbers. Dev-only: wide-open CORS,
-Flask's built-in server, no auth — not something to deploy anywhere.
+| Route | Does |
+|---|---|
+| `GET /bonds?type=natcat` | `list_bonds` |
+| `GET /bonds/<id>` | `get_bond` (404 for unknown or pre-Supabase ids) |
+| `POST /bonds` | `create_bond`, returns `{"dealId": "<id>"}` |
+| `POST /bonds/link` | `link_contract_address` |
 
-## Fake end-to-end flow
-
-```bash
-python3 bonds.py
-```
-
-Creates a real bond record, generates a fake (non-deployed) contract
-address, links it, updates status, reads the record back, and prints a
-simulated "contract read" tying the off-chain unique ID to the fake
-on-chain address — proving the round trip without needing a real deploy.
+Dev-only: CORS is wide open and there's no auth. Run it alongside
+`npm run dev` in `ui/`.

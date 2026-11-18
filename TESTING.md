@@ -82,6 +82,8 @@ environment. See the audit's §5 findings below for what that trace found.
 | 2026-09-16 | `pytest` (`api/`, full suite) | 71/71 pass | `test_bonds.py`(15) + `test_products.py`(21) + `test_monitor.py`(35), no interference between any of the three. |
 | 2026-09-16 | `forge test` (`DEAL 000/`, after §2.4/§2.5 trigger rewrite) | 53/53 pass | Up from 38 (net +15). New suites `TriggerValidationTest`(4); `TriggerReportTest` grew 6→15; `EarlyTriggerGuardTest` grew 2→3. Two real test bugs caught and fixed during this work — see audit note below. |
 | 2026-09-16 | `./run.sh quick` live on anvil (deploy → fund → deposit → close → markMatured → withdraw) | Pass | Not a unit test — a real deployed instance. Confirmed `markMatured()` correctly reverts `NoReports` with zero reports posted, then succeeds once a fresh below-threshold report exists; investor withdrew exactly the $500,000 principal deposited. Full detail below. |
+| 2026-11-18 | `pytest` (`api/`, full suite after Supabase move) | 90/90 pass | `test_bonds.py`(11) + `test_natcat_store.py`(9) + products/monitor/report_trigger. Both live Supabase tests ran (bond round-trip; `natcat_latest` vs raw table). |
+| 2026-11-18 | `./run-insured-test.sh` live on anvil + Supabase | Pass | Record created in `rpos` (dealId 5), CatBond deployed and linked, v3 trigger reported $46.0B industry loss read from `natcat_latest` (monitor entry #16, product_version 3). |
 
 ---
 

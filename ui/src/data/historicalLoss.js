@@ -44,21 +44,19 @@ export const INDUSTRY_LOSS_HISTORY = [
 // product's endpoint/units/maxReportAge ever change, update all three
 // places together.
 //
-// v2 (2026-09-16): switched from RHODEX-NATCAT-LOSS + ALL-LOSSES[-1] to
-// the simpler latest-report endpoint, which returns the newest record
-// directly — no array to fetch/index into. `valuePath` below is each
-// metric's primary (full-year total) field; it's only used here to
-// *identify* which metric a trigger reports on (matched against the
-// registry), not to resolve a value — the monitor does the real
-// resolution off-chain with a total→quarterly fallback chain (see
-// natcat_loss.v2.json's value_paths), since the current in-progress year
-// never has a total until it completes.
+// v3 (2026-11-18): reads RHODEX's own Supabase natcat_latest view instead
+// of Bubble. The view already applies the total→latest-quarter fallback,
+// so each metric's `valuePath` below is a single field. Like before, the
+// UI only uses valuePath to *identify* which metric a trigger reports on
+// (matched against the registry); the monitor resolves the real value
+// off-chain. The endpoint needs the server-side key, so it isn't
+// browsable; it's here because the trigger stores it (as a hash).
 export const NATCAT_LOSS_PRODUCT = {
   productId: 'natcat_loss',
-  version: 2,
+  version: 3,
   units: 'usd_billions',
   maxReportAgeSeconds: 150 * 24 * 60 * 60, // 150 days
-  endpoint: 'https://realestatesimplified.xyz/version-test/api/1.1/wf/latest-report',
+  endpoint: 'https://nqldthhutpfxpxnqqxsk.supabase.co/rest/v1/natcat_latest',
 }
 
 export const TRIGGER_TYPES = {
@@ -69,7 +67,7 @@ export const TRIGGER_TYPES = {
     history: ECONOMIC_LOSS_HISTORY,
     maxB: 1000,
     dealTypeCode: 1, // legacy UI selector value — kept only to pick the row below
-    valuePath: 'response.reports."economic-loss | total"',
+    valuePath: '[0].economic_loss_b',
   },
   industry: {
     id: 'industry',
@@ -78,6 +76,6 @@ export const TRIGGER_TYPES = {
     history: INDUSTRY_LOSS_HISTORY,
     maxB: 200,
     dealTypeCode: 0,
-    valuePath: 'response.reports."industry-loss | total"',
+    valuePath: '[0].industry_loss_b',
   },
 }

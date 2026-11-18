@@ -127,11 +127,17 @@ def test_real_registry_natcat_loss_v2_exposes_both_metrics_as_fallback_chains():
         assert isinstance(path, list) and len(path) == 4  # total, Q3, Q2, Q1
 
 
-def test_real_registry_get_latest_active_returns_v2_not_deprecated_v1():
+def test_real_registry_get_latest_active_returns_v3_supabase():
     d = registry.get_latest_active("natcat_loss")
-    assert d["version"] == 2
+    assert d["version"] == 3
     assert d["product_id"] == "natcat_loss"
     assert d["status"] == "active"
+    assert d["endpoint"].endswith("/rest/v1/natcat_latest")
+    assert d["auth_scheme"] == "supabase"
+
+
+def test_real_registry_v2_still_loads_but_is_deprecated():
+    assert registry.get("natcat_loss", 2)["status"] == "deprecated"
 
 
 def test_real_registry_v1_still_loads_but_is_deprecated():

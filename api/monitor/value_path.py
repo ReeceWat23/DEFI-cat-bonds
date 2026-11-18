@@ -106,7 +106,8 @@ def resolve_first(data: dict, paths: list[str]):
     figures exist until then. A product's value_paths entry can be this
     kind of list instead of a single string; the annual total is tried
     first, falling back to the latest available quarter, mirroring
-    api/natcat_loss.py's own latest_loss_for_year() fallback order.
+    the old Bubble client's latest_loss_for_year() fallback order (v3
+    does the same fallback inside the natcat_latest view instead).
     """
     errors = []
     for path in paths:

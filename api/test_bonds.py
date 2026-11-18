@@ -1,193 +1,146 @@
 """
-Test suite for bonds.py.
+Tests for bonds.py.
 
-No mocking framework/fixtures exist elsewhere in this repo for the API
-scripts (natcat_loss.py's validate.sh is a live bash smoke test), and
-Bubble's API workflows here have no local equivalent to run against — so
-the integration tests below hit the real live endpoint, same as
-bonds.py's own __main__ block. Each integration test run creates one real
-throwaway Bond record in the "version-test" environment.
+Unit tests stub out HTTP. The live round-trip test runs only when
+SUPABASE_URL plus a service/secret key are in the environment, and it
+creates and then deletes one real row in public.rpos.
 
 Run: pytest api/test_bonds.py -v
-(or via api/run_tests.sh, which runs this alongside validate.sh)
 """
 
+import os
 import secrets
 
 import pytest
+import requests
 
 import bonds
 
 
-# ── Unit tests — no network ──────────────────────────────────────────────────
+class _FakeResp:
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status_code = status
+        self.ok = status < 400
+        self.content = b"x" if payload is not None else b""
+        self.text = str(payload)
 
-def test_build_bond_payload_includes_all_fields_even_when_unset():
-    payload = bonds.build_bond_payload(cedant="Acme", description="d", maturity="2027-01-01", value=100)
-    assert set(payload.keys()) == {
-        "cedant", "contract-address", "description", "Loss-history",
-        "maturity", "SOV", "status-tiggered", "value",
-        "trigger-address", "product-id", "product-version",
-    }
-    # Fields not passed in stay present, just empty — not omitted.
-    assert payload["contract-address"] == ""
-    assert payload["Loss-history"] == ""
-    assert payload["SOV"] == ""
-    assert payload["trigger-address"] == ""
-    assert payload["product-id"] == ""
-    assert payload["product-version"] == 0
-
-
-def test_build_bond_payload_honors_trigger_fields():
-    payload = bonds.build_bond_payload(
-        trigger_address="0xTrig", product_id="natcat_loss", product_version=1,
-    )
-    assert payload["trigger-address"] == "0xTrig"
-    assert payload["product-id"] == "natcat_loss"
-    assert payload["product-version"] == 1
-
-
-def test_build_bond_payload_defaults_status_to_ok():
-    payload = bonds.build_bond_payload()
-    assert payload["status-tiggered"] == bonds.STATUS_OK
-
-
-def test_build_bond_payload_honors_explicit_values():
-    payload = bonds.build_bond_payload(
-        cedant="Acme", description="d", maturity="2027-01-01", value=100,
-        status_tiggered=bonds.STATUS_TRIGGERED,
-        contract_address="0xabc", loss_history="loss.csv", sov="sov.pdf",
-    )
-    assert payload["contract-address"] == "0xabc"
-    assert payload["Loss-history"] == "loss.csv"
-    assert payload["SOV"] == "sov.pdf"
-    assert payload["status-tiggered"] == bonds.STATUS_TRIGGERED
-
-
-@pytest.mark.parametrize("response, expected", [
-    ({"response": {"id": "abc123"}}, "abc123"),
-    ({"id": "abc123"}, "abc123"),
-    ({"response": {"_id": "abc123"}}, "abc123"),
-    ({"response": {"unique-id": "abc123"}}, "abc123"),
-])
-def test_extract_unique_id_finds_known_field_names(response, expected):
-    assert bonds.extract_unique_id(response) == expected
-
-
-def test_extract_unique_id_returns_none_when_absent():
-    assert bonds.extract_unique_id({"response": {"status": "success"}}) is None
-
-
-def test_extract_unique_id_handles_missing_response_key():
-    assert bonds.extract_unique_id({"status": "success"}) is None
-
-
-@pytest.mark.parametrize("response, expected", [
-    ({"response": {"bonds": [{"cedant": "Acme"}]}}, [{"cedant": "Acme"}]),
-    ({"bonds": [{"cedant": "Acme"}]}, [{"cedant": "Acme"}]),
-    ({"response": {"results": [{"cedant": "Acme"}]}}, [{"cedant": "Acme"}]),
-])
-def test_extract_bonds_finds_known_field_names(response, expected):
-    assert bonds.extract_bonds(response) == expected
-
-
-def test_extract_bonds_returns_empty_list_when_absent():
-    assert bonds.extract_bonds({"response": {"status": "success"}}) == []
-
-
-# ── Integration tests — hit the live API ─────────────────────────────────────
-#
-# Skip cleanly (rather than fail) if no API key is configured, so this
-# suite doesn't break for anyone running it without .env set up.
-
-pytestmark = pytest.mark.skipif(not bonds.API_KEY, reason="RHODEX_API_KEY not set in .env")
+    def json(self):
+        return self._payload
 
 
 @pytest.fixture
-def fresh_bond_id():
-    """Creates one real bond record and returns its unique id."""
-    payload = bonds.build_bond_payload(
-        cedant="Test Suite Cedant",
-        description="Created by test_bonds.py — safe to ignore/delete.",
-        maturity="2027-01-01",
-        value=1,
-    )
-    resp = bonds.create_bond(payload)
-    unique_id = bonds.extract_unique_id(resp)
-    assert unique_id, f"create_bond didn't return a usable id: {resp}"
-    return unique_id
+def captured(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co/")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "eyJfake")
+    calls = []
+    responses = []
+
+    def fake_request(method, url, **kw):
+        calls.append({"method": method, "url": url, **kw})
+        return responses.pop(0)
+
+    monkeypatch.setattr(bonds.requests, "request", fake_request)
+    return calls, responses
 
 
-def test_create_bond_returns_a_usable_id(fresh_bond_id):
-    assert isinstance(fresh_bond_id, str)
-    assert len(fresh_bond_id) > 0
+# ── payload ───────────────────────────────────────────────────────────────────
+
+def test_payload_blanks_become_null_and_defaults_to_natcat():
+    p = bonds.build_bond_payload(cedant="Acme", value=100)
+    assert set(p) == set(bonds.WRITABLE_COLUMNS)
+    assert p["maturity"] is None            # "" would be rejected by the date column
+    assert p["contract_address"] is None    # "" would collide on the UNIQUE constraint
+    assert p["trigger_type"] == "natcat"
+    assert p["status_triggered"] == bonds.STATUS_OK
 
 
-def test_link_contract_address_round_trips(fresh_bond_id):
-    fake_address = "0x" + secrets.token_hex(20)
-
-    link_resp = bonds.link_contract_address(fresh_bond_id, fake_address)
-    assert link_resp.get("status") == "success"
-
-    read_back = bonds.get_bond(fresh_bond_id)
-    stored_address = read_back.get("response", {}).get("bond", {}).get("contract-address")
-    assert stored_address == fake_address
+def test_payload_rejects_bad_status():
+    with pytest.raises(ValueError):
+        bonds.build_bond_payload(status_triggered=7)
 
 
-def test_update_bond_status_round_trips(fresh_bond_id):
-    resp = bonds.update_bond_status(fresh_bond_id, bonds.STATUS_TRIGGERED)
-    assert resp.get("status") == "success"
-
-    read_back = bonds.get_bond(fresh_bond_id)
-    bond = read_back.get("response", {}).get("bond", {})
-    # Read-side field is spelled "status-triggered" (correctly) even
-    # though the write-side param is "status-tiggered" — see bonds.py's
-    # module docstring.
-    assert bond.get("status-triggered") == bonds.STATUS_TRIGGERED
+def test_create_rejects_unknown_fields():
+    with pytest.raises(ValueError):
+        bonds.create_bond({"contract-address": "0xabc"})  # hyphenated name, not a column
 
 
-def test_get_bond_reflects_created_fields(fresh_bond_id):
-    read_back = bonds.get_bond(fresh_bond_id)
-    bond = read_back.get("response", {}).get("bond", {})
-    assert bond.get("cedant") == "Test Suite Cedant"
-    assert bond.get("value") == 1
+# ── headers / config ────────────────────────────────────────────────────────
+
+def test_jwt_key_sends_bearer_but_secret_key_does_not():
+    assert bonds._headers("eyJabc")["Authorization"] == "Bearer eyJabc"
+    assert "Authorization" not in bonds._headers("sb_secret_abc")
+    assert bonds._headers("sb_secret_abc")["apikey"] == "sb_secret_abc"
 
 
-def test_get_bond_on_unknown_id_returns_empty_not_an_error():
-    resp = bonds.get_bond("this-id-does-not-exist-" + secrets.token_hex(4))
-    assert resp.get("status") == "success"
-    assert resp.get("response", {}).get("bond") == {}
+def test_missing_config_raises(monkeypatch):
+    for k in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(EnvironmentError):
+        bonds.get_bond(1)
 
 
-def test_list_bonds_natcat_returns_bonds_with_expected_shape():
-    resp = bonds.list_bonds("natcat")
-    assert resp.get("status") == "success"
-    result = bonds.extract_bonds(resp)
-    assert isinstance(result, list)
-    assert len(result) > 0, "expected at least one live natcat bond to already exist"
-    for bond in result:
-        assert "cedant" in bond
-        assert "contract-address" in bond
-        assert "status-triggered" in bond
+# ── requests sent ────────────────────────────────────────────────────────────
+
+def test_create_posts_and_returns_row(captured):
+    calls, responses = captured
+    responses.append(_FakeResp([{"id": 42, "cedant": "Acme"}], 201))
+    row = bonds.create_bond(bonds.build_bond_payload(cedant="Acme"))
+    assert row["id"] == 42
+    c = calls[0]
+    assert c["method"] == "POST"
+    assert c["url"] == "https://example.supabase.co/rest/v1/rpos"
+    assert c["headers"]["Prefer"] == "return=representation"
 
 
-def test_full_lifecycle_end_to_end():
-    """Mirrors bonds.py's __main__ flow as a single assertive test."""
-    bond = bonds.build_bond_payload(
-        cedant="Lifecycle Test Co",
-        description="Full create -> link -> status -> read cycle.",
-        maturity="2027-06-30",
-        value=250_000,
-    )
-    create_resp = bonds.create_bond(bond)
-    unique_id = bonds.extract_unique_id(create_resp)
-    assert unique_id
+def test_link_patches_by_id_accepting_string_id(captured):
+    calls, responses = captured
+    responses.append(_FakeResp([{"id": 42, "contract_address": "0xabc"}]))
+    bonds.link_contract_address("42", "0xabc")
+    assert calls[0]["method"] == "PATCH"
+    assert calls[0]["params"] == {"id": "eq.42"}
+    assert calls[0]["json"] == {"contract_address": "0xabc"}
 
-    fake_address = "0x" + secrets.token_hex(20)
-    assert bonds.link_contract_address(unique_id, fake_address).get("status") == "success"
-    assert bonds.update_bond_status(unique_id, bonds.STATUS_MATURED).get("status") == "success"
 
-    final = bonds.get_bond(unique_id).get("response", {}).get("bond", {})
-    assert final.get("contract-address") == fake_address
-    assert final.get("status-triggered") == bonds.STATUS_MATURED
-    assert final.get("cedant") == "Lifecycle Test Co"
-    assert final.get("value") == 250_000
+def test_get_missing_bond_raises_not_found(captured):
+    _, responses = captured
+    responses.append(_FakeResp([]))
+    with pytest.raises(bonds.BondNotFound):
+        bonds.get_bond(999)
+
+
+def test_list_filters_by_trigger_type(captured):
+    calls, responses = captured
+    responses.append(_FakeResp([]))
+    assert bonds.list_bonds("natcat") == []
+    assert calls[0]["params"]["trigger_type"] == "eq.natcat"
+
+
+def test_http_error_surfaces_postgrest_message(captured):
+    _, responses = captured
+    responses.append(_FakeResp({"message": "violates check constraint"}, 400))
+    with pytest.raises(requests.HTTPError, match="check constraint"):
+        bonds.update_bond_status(1, bonds.STATUS_OK)
+
+
+# ── live round-trip ──────────────────────────────────────────────────────────
+
+_live = bool(os.environ.get("SUPABASE_URL") and
+             (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SECRET_KEY")))
+
+
+@pytest.mark.skipif(not _live, reason="Supabase credentials not in env")
+def test_live_round_trip():
+    row = bonds.create_bond(bonds.build_bond_payload(
+        cedant="pytest", description="throwaway", maturity="2027-01-01", value=1))
+    try:
+        addr = "0x" + secrets.token_hex(20)
+        bonds.link_contract_address(row["id"], addr)
+        bonds.update_bond_status(row["id"], bonds.STATUS_TRIGGERED)
+        got = bonds.get_bond(str(row["id"]))
+        assert got["contract_address"] == addr
+        assert got["status_triggered"] == bonds.STATUS_TRIGGERED
+        assert str(got["maturity"]) == "2027-01-01"
+        assert any(b["id"] == row["id"] for b in bonds.list_bonds("natcat"))
+    finally:
+        bonds._request("DELETE", params={"id": f"eq.{row['id']}"})

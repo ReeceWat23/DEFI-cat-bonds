@@ -543,17 +543,17 @@ export default function DealPage() {
   // Data v2, §3.3); an empty string means this bond predates that wiring
   // or was posted through a path that never created a web2 record (see
   // deploy_deal.py vs. the manual-deploy CLI path). Fetched through the
-  // local Flask server (api/server.py) — the browser never calls Bubble
+  // local Flask server (api/server.py) — the browser never calls the bond store
   // directly, same rule as LiveBondsMap's bonds list.
-  const [bubbleBond, setBubbleBond] = useState(null)
+  const [dealRecord, setDealRecord] = useState(null)
   useEffect(() => {
-    setBubbleBond(null)
+    setDealRecord(null)
     if (!dealId) return
     let cancelled = false
     fetch(`http://localhost:5001/bonds/${dealId}`)
       .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (!cancelled) setBubbleBond(data) })
-      .catch(() => { if (!cancelled) setBubbleBond(null) })
+      .then(data => { if (!cancelled) setDealRecord(data) })
+      .catch(() => { if (!cancelled) setDealRecord(null) })
     return () => { cancelled = true }
   }, [dealId])
 
@@ -922,7 +922,7 @@ export default function DealPage() {
                   </div>
                 </div>
                 <p className="text-sm text-[var(--rhodex-text-dark-muted)] leading-relaxed mb-4 whitespace-pre-line">
-                  {bubbleBond?.description || <span className="italic">Description not yet available.</span>}
+                  {dealRecord?.description || <span className="italic">Description not yet available.</span>}
                 </p>
 
                 <div className="pt-2 border-t-2 border-[var(--rhodex-text-dark)]/10">

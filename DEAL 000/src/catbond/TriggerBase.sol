@@ -35,7 +35,6 @@ abstract contract TriggerBase is ITrigger {
         string  productId;
         uint256 version;
         string  valuePath;
-  
         string  units;
         uint256 maxReportAge;   // seconds
         bytes32 endpointHash;

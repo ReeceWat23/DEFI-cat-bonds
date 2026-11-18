@@ -1,0 +1,41 @@
+{
+  "product_id": "natcat_loss",
+  "version": 3,
+  "status": "active",
+  "name": "RHODEX NatCat Loss — latest report (economic & industry loss)",
+  "endpoint": "https://nqldthhutpfxpxnqqxsk.supabase.co/rest/v1/natcat_latest",
+  "method": "GET",
+  "auth": "SUPABASE_SERVICE_ROLE_KEY",
+  "auth_scheme": "supabase",
+  "call_parameters": {
+    "select": "*"
+  },
+  "response_schema": {
+    "type": "array",
+    "description": "PostgREST always returns an array. natcat_latest has exactly one row (or none if the natcat table is empty): the most recent year on file, with each metric taken from the latest period in that year that has a figure (FY -> Q3 -> Q2 -> Q1).",
+    "items": {
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "economic_loss_b": { "type": "number", "description": "Economic loss, $B, cumulative year-to-date as of economic_period" },
+        "economic_period": { "type": "string", "enum": ["Q1", "Q2", "Q3", "FY"] },
+        "economic_source_url": { "type": "string" },
+        "economic_as_of": { "type": "string", "format": "date" },
+        "industry_loss_b": { "type": "number", "description": "Insured (industry) loss, $B, cumulative year-to-date as of industry_period" },
+        "industry_period": { "type": "string", "enum": ["Q1", "Q2", "Q3", "FY"] },
+        "industry_source_url": { "type": "string" },
+        "industry_as_of": { "type": "string", "format": "date" },
+        "latest_period": { "type": "string", "enum": ["Q1", "Q2", "Q3", "FY"] },
+        "latest_metadata": { "type": "object", "description": "Free-form report detail from the newest row, e.g. regional_distribution" }
+      }
+    }
+  },
+  "value_paths": {
+    "economic_loss": "[0].economic_loss_b",
+    "industry_loss": "[0].industry_loss_b"
+  },
+  "units": "usd_billions",
+  "update_frequency": "quarterly",
+  "max_report_age": 150,
+  "data_source_description": "RHODEX's own NatCat loss table in Supabase (public.natcat), read through the natcat_latest view. Same Gallagher Re-sourced dataset as v1/v2, migrated off Bubble 2026-11-18. The total-then-latest-quarter fallback that v2 did with value_path chains now happens in the view, so each metric is a single path."
+}

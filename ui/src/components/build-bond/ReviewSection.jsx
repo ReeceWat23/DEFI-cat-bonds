@@ -30,7 +30,7 @@ function guessSellerName(website) {
 }
 
 // Local Flask dev server (api/server.py) — the one sanctioned hop between
-// the browser and Bubble. Mirrors api/deploy_deal.py's two-write handshake
+// the browser and the bond store (Supabase). Mirrors api/deploy_deal.py's two-write handshake
 // (create draft record -> dealId -> deploy on-chain with it embedded ->
 // link the deployed address back) but reached from the browser instead of
 // a script.
@@ -41,7 +41,7 @@ function estimateMaturityDate() {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-async function createBubbleRecord({ website, description, raise }) {
+async function createDealRecord({ website, description, raise }) {
   const res = await fetch(BONDS_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -52,9 +52,9 @@ async function createBubbleRecord({ website, description, raise }) {
       value: raise,
     }),
   })
-  if (!res.ok) throw new Error(`Bubble create-bond failed (${res.status})`)
+  if (!res.ok) throw new Error(`create-bond failed (${res.status})`)
   const data = await res.json()
-  if (!data.dealId) throw new Error(data.error || 'Bubble did not return a bond id')
+  if (!data.dealId) throw new Error(data.error || 'the bond store did not return a bond id')
   return data.dealId
 }
 
@@ -104,7 +104,7 @@ export default function ReviewSection({ state, network }) {
   const [bondAddr, setBondAddr] = useState(null)
   const [dealId, setDealId] = useState(null)
   const [creatingBond, setCreatingBond] = useState(false)
-  const [bubbleError, setBubbleError] = useState(null)
+  const [recordError, setRecordError] = useState(null)
 
   useEffect(() => {
     if (bondConfirmed && bondReceipt?.contractAddress) {
@@ -113,7 +113,7 @@ export default function ReviewSection({ state, network }) {
       localStorage.setItem('catbond_address', addr)
       localStorage.setItem('catbond_trigger', triggerAddr)
       // Step 3 of the handshake — link the now-deployed address back onto
-      // the Bubble record. Fire-and-forget: the on-chain deploy already
+      // the bond record. Fire-and-forget: the on-chain deploy already
       // succeeded and carries dealId itself, so a failed link here doesn't
       // block the UI, just logs — the record stays creatable/linkable by
       // hand later via bonds.link_contract_address(dealId, addr).
@@ -133,20 +133,20 @@ export default function ReviewSection({ state, network }) {
   }
 
   async function postDeal() {
-    setBubbleError(null)
+    setRecordError(null)
     setCreatingBond(true)
-    // Bubble's schema (api/bonds.py) has no separate loss-history field with
-    // upload support yet — fold it into the one free-text field that does
-    // round-trip, rather than silently dropping what the sponsor typed.
+    // No loss-history upload yet (rpos.loss_history_path is for a stored
+    // file) — fold the typed text into the description rather than
+    // silently dropping what the sponsor entered.
     const summary = state.disclosure.description.edited || state.disclosure.description.generated
     const lossHistory = state.disclosure.lossHistory.trim()
     const description = lossHistory ? `${summary}\n\nLoss history: ${lossHistory}` : summary
     let newDealId
     try {
-      newDealId = await createBubbleRecord({ website: state.disclosure.website, description, raise: layer.raise })
+      newDealId = await createDealRecord({ website: state.disclosure.website, description, raise: layer.raise })
     } catch (e) {
       setCreatingBond(false)
-      setBubbleError(e.message || String(e))
+      setRecordError(e.message || String(e))
       return // don't deploy on-chain without a web2 record to link it to
     }
     setDealId(newDealId)
@@ -265,9 +265,9 @@ export default function ReviewSection({ state, network }) {
         {!triggerAddr && (
           <p className="text-xs text-red-600 mb-3">No canonical trigger configured for this deal type yet.</p>
         )}
-        {bubbleError && (
+        {recordError && (
           <p className="text-xs text-red-600 mb-3">
-            Couldn't create the deal record ({bubbleError}) — make sure the local API server is
+            Couldn't create the deal record ({recordError}) — make sure the local API server is
             running (<code className="wkb-mono">python3 api/server.py</code>). Nothing was deployed.
           </p>
         )}

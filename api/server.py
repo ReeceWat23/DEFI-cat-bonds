@@ -1,9 +1,8 @@
 """
 Minimal local dev server — the server-side hop for "the browser never
-talks to the bond store directly" (see bonds_supabase.py, natcat_loss.py).
+talks to the bond store directly" (see bonds.py).
 It holds the Supabase service-role key, reads/writes public.rpos, and
-hands the UI back plain JSON. (Bond store moved from Bubble to Supabase
-2026-11-17; the old Bubble client is still in bonds.py for reference.)
+hands the UI back plain JSON.
 
 Dev-only. Not deployed anywhere; run it alongside the Vite dev server:
 
@@ -37,7 +36,7 @@ CANONICAL_TRIGGERS/RHODEX_COMPANY_WALLET in the UI.
 import requests
 from flask import Flask, jsonify, request
 
-import bonds_supabase as bonds
+import bonds
 
 app = Flask(__name__)
 
@@ -68,8 +67,8 @@ def get_bonds():
 @app.get("/bonds/<deal_id>")
 def get_bond_by_id(deal_id):
     if not deal_id.isdigit():
-        # Pre-migration deals carry a Bubble-style id on-chain; those records
-        # don't exist in Supabase.
+        # Deals posted before the Supabase move (2026-11-17) carry a
+        # non-numeric id on-chain; there's no record for them.
         return jsonify({"error": "bond not found"}), 404
     try:
         return jsonify(bonds.get_bond(deal_id))

@@ -1,7 +1,7 @@
 """
 Generic trigger-reporting helpers (sprint plan `api/it3_plan_triggers_n_mgmnt.md`
 §2.6). Reworked from the pre-sprint version, which read a trigger's own
-`dealType()`/`lossLimit()` and called `natcat_loss.py` directly at report
+`dealType()`/`lossLimit()` and called the NatCat API client directly at report
 time. Neither exists anymore: `dealType`/`lossLimit` were removed from the
 trigger in §2.4 (the trigger's `productConfig.valuePath` encodes the same
 choice now, and the threshold moved to the bond), and every report must now

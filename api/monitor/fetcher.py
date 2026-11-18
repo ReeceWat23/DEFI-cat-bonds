@@ -27,11 +27,8 @@ from dotenv import load_dotenv
 
 from . import value_path as value_path_module
 
-# Pre-refactor, the reporting flow imported natcat_loss.py directly, which
-# loaded .env as an import side effect. The generic monitor path (this
-# module) never picked up an equivalent call, so RHODEX_API_KEY silently
-# never reached os.environ unless something else happened to import
-# natcat_loss.py first. Same load_dotenv() call natcat_loss.py itself uses.
+# Load .env explicitly: products name their secret by env var (`auth`), and
+# nothing else on the monitor path is guaranteed to have loaded it first.
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
@@ -49,7 +46,7 @@ def fetch_raw(product: dict, timeout: int = 10) -> dict:
     if not secret:
         return _raw_failure(None, None, f"secret env var {auth_env_var!r} is not set")
 
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {secret}"}
+    headers = _auth_headers(product.get("auth_scheme", "bearer"), secret)
     method = product["method"]
     endpoint = product["endpoint"]
     params = product["call_parameters"]
@@ -88,6 +85,20 @@ def resolve_metric(data: dict, path) -> tuple[float | None, str | None]:
         return float(resolver(data, path)), None
     except value_path_module.ValuePathError as e:
         return None, f"value_path did not resolve: {e}"
+
+
+def _auth_headers(scheme: str, secret: str) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if scheme == "supabase":
+        # Supabase REST: the key always goes in `apikey`. Legacy service_role
+        # keys are JWTs and also go in Authorization; new sb_secret_ keys
+        # aren't JWTs and must not.
+        headers["apikey"] = secret
+        if secret.startswith("eyJ"):
+            headers["Authorization"] = f"Bearer {secret}"
+    else:
+        headers["Authorization"] = f"Bearer {secret}"
+    return headers
 
 
 def _raw_failure(http_status: int | None, raw_hash: str | None, message: str) -> dict:

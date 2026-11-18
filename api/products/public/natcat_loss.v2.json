@@ -1,7 +1,7 @@
 {
   "product_id": "natcat_loss",
   "version": 2,
-  "status": "active",
+  "status": "deprecated",
   "name": "RHODEX NatCat Loss — latest report (economic & industry loss)",
   "endpoint": "https://realestatesimplified.xyz/version-test/api/1.1/wf/latest-report",
   "method": "POST",
@@ -49,5 +49,5 @@
   "units": "usd_billions",
   "update_frequency": "quarterly",
   "max_report_age": 150,
-  "data_source_description": "RHODEX's latest-report endpoint — the same NatCat Loss dataset as v1, but returns only the most recently added record directly (no ALL-LOSSES array to fetch and index into). Each metric falls back from the full-year total to the latest available quarter, mirroring api/natcat_loss.py's own latest_loss_for_year() logic, since the current in-progress year never has a total until it completes."
+  "data_source_description": "RHODEX's latest-report endpoint — the same NatCat Loss dataset as v1, but returns only the most recently added record directly (no ALL-LOSSES array to fetch and index into). Each metric falls back from the full-year total to the latest available quarter, mirroring api/natcat_loss.py's own latest_loss_for_year() logic, since the current in-progress year never has a total until it completes. Deprecated 2026-11-18: superseded by v3, which reads the same dataset from RHODEX's own Supabase table instead of Bubble."
 }

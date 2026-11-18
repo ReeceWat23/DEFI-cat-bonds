@@ -78,6 +78,7 @@ product age and fail independently even though they share an HTTP call.
 | `endpoint` | string | URL the monitor calls. |
 | `method` | `"GET"` \| `"POST"` \| `"PUT"` | |
 | `auth` | string | **The name of a secret/env var, never the secret's value.** e.g. `"RHODEX_API_KEY"` — the monitor reads that env var at call time. |
+| `auth_scheme` | string, optional | How the secret is sent: `"bearer"` (default, `Authorization: Bearer`) or `"supabase"` (`apikey` header, plus Bearer for legacy JWT keys). |
 | `call_parameters` | object | Request params/body sent verbatim. |
 | `response_schema` | object | Free-form description of the response shape — enough for a human (or the monitor) to know what they're looking at. Not a strict JSON Schema validator in this iteration. |
 | `value_paths` | object | `{metric_name: path, ...}`, at least one entry. `path` is a single path string, or a **fallback chain** (list of strings, tried in order — see below). See convention below and "One endpoint, multiple metrics" above. |
@@ -106,8 +107,9 @@ so far. v2's `economic_loss` metric is
   "response.reports.\"Q1 economic\""
 ]
 ```
-mirroring `api/natcat_loss.py`'s own `latest_loss_for_year()` fallback
-order exactly. The trigger's on-chain `productConfig.valuePath` still
+mirroring the old Bubble client's `latest_loss_for_year()` fallback
+order exactly. (v3 moves this fallback into the Supabase `natcat_latest`
+view, so its value_paths are single strings again.) The trigger's on-chain `productConfig.valuePath` still
 stores a single string (the chain's first/primary entry) purely for
 identification — the fallback only matters to the off-chain monitor
 deciding what to actually report; the contract never re-derives anything.
@@ -155,10 +157,16 @@ not on the product.
 
 ## Current products
 
-- `public/natcat_loss.v2.json` — RHODEX's `latest-report` endpoint, one
+- `public/natcat_loss.v3.json` — **active since 2026-11-18.** RHODEX's own
+  Supabase view `natcat_latest` (GET, `auth_scheme: "supabase"`, key in
+  `SUPABASE_SERVICE_ROLE_KEY`). Same dataset and the same two metrics as v2,
+  migrated off Bubble. The total-then-latest-quarter fallback happens in the
+  view, so each metric is one path: `[0].economic_loss_b` / `[0].industry_loss_b`.
+  See `api/README.md` for the table.
+- `public/natcat_loss.v2.json` — **deprecated 2026-11-18** (superseded by v3). RHODEX's Bubble `latest-report` endpoint, one
   call, two metrics: `economic_loss` and `industry_loss`, both annual,
-  both sourced from the same underlying `api/natcat_loss.py` client
-  (`fetch_latest_report()`). Each metric is a fallback chain (total, then
+  both sourced from Bubble's `latest-report` workflow (the Bubble client
+  was removed after the Supabase move). Each metric is a fallback chain (total, then
   Q3, Q2, Q1) since the current in-progress year never has a full-year
   total until it completes. Scope for this sprint is exactly these two
   (economic-loss and ILW/industry-loss deals) per the plan's §0 — a new
@@ -175,8 +183,8 @@ not on the product.
   to resolve against live data today. See its own
   `data_source_description` for the full account.
 
-`natcat_loss.py` itself is unchanged by any of this — it's still the one
-place that actually calls the live API on the CLI/script side. The
-registry describes that same data source declaratively so the monitor and
-future trigger deploys can reference it by product/metric instead of every
-call site hardcoding endpoint details independently.
+The registry describes each data source declaratively so the monitor and
+trigger deploys can reference it by product/metric instead of every call
+site hardcoding endpoint details independently. Three places snapshot the
+active product and must change together: this registry,
+`DEAL 000/script/Setup.s.sol`, and `ui/src/data/historicalLoss.js`.

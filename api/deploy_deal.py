@@ -39,7 +39,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-import bonds_supabase as bonds  # noqa: E402
+import bonds  # noqa: E402
 
 DEAL_000_DIR = os.path.join(os.path.dirname(__file__), "..", "DEAL 000")
 RPC_URL = "http://127.0.0.1:8545"

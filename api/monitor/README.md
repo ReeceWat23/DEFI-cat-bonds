@@ -71,8 +71,8 @@ share a fetch.
   Python. Turning `get_product_health()` into a real `GET /health/<id>`
   route is a few lines with the `flask` dependency already in
   `requirements.txt`, but there's no running backend server anywhere in
-  this repo today for the frontend to call (the UI talks to Bubble and to
-  the chain directly, never to a Python server) — wiring that up is a
+  this repo today for the frontend to call (the UI talks to `server.py`
+  for bond records and to the chain directly) — wiring that up is a
   bigger decision (hosting, CORS, deploy target) than this sprint's scope
   asked for, so it's left as the obvious next step rather than guessed at.
 

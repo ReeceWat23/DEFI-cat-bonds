@@ -45,6 +45,11 @@ shape — see note below):
                                       (Trigger.latestReportSince, §2.4)
     data_source_description   str    plain-language description of where
                                       this number comes from
+    auth_scheme               str    OPTIONAL. How the `auth` secret is sent:
+                                      "bearer" (default) -> Authorization:
+                                      Bearer <secret>; "supabase" -> apikey
+                                      header (plus Bearer when the key is a
+                                      legacy JWT), for Supabase REST tables.
 
 Deviation from the plan as written: §2.2 specs a single `value_path` string
 and a single `peril_type` per product, implying one product per peril. In
@@ -81,6 +86,7 @@ REQUIRED_FIELDS = (
 
 VALID_STATUS = ("active", "deprecated")
 VALID_METHODS = ("GET", "POST", "PUT")
+VALID_AUTH_SCHEMES = ("bearer", "supabase")
 
 # Fields that trigger a version bump when changed — see the versioning rule
 # above. Exposed so registry.py (and later the admin "build a trigger" flow,
@@ -139,6 +145,9 @@ def validate(data: dict) -> list[str]:
             # token) is unlikely to look like an env-var name. This exists
             # to catch an obvious mistake, not to guarantee correctness.
             errors.append("auth looks like it might be a secret value, not a secret name — double check")
+
+    if "auth_scheme" in data and data["auth_scheme"] not in VALID_AUTH_SCHEMES:
+        errors.append(f"auth_scheme must be one of {VALID_AUTH_SCHEMES}, got {data['auth_scheme']!r}")
 
     if "call_parameters" in data and not isinstance(data["call_parameters"], dict):
         errors.append("call_parameters must be an object")
