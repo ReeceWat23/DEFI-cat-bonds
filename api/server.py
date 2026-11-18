@@ -18,14 +18,16 @@ Endpoints:
                                no localStorage/param plumbing needed.
   POST /bonds              -> create_bond(), the "Build a bond" workshop's
                                web2 half of Post deal. Body: {cedant,
-                               description, maturity, value}. Returns
+                               description, maturity, value, triggerAddress?,
+                               productId?, productVersion?}. Returns
                                {"dealId": "..."}. Mirrors deploy_deal.py's
                                step 1 (create draft record -> dealId), just
                                reached from the browser instead of a script.
   POST /bonds/link         -> link_contract_address(), step 3 of the same
                                handshake — attach the now-deployed contract
                                address back onto the bond record. Body:
-                               {dealId, contractAddress}.
+                               {dealId, contractAddress, triggerAddress?,
+                               productId?, productVersion?}.
 
 CORS is wide open (Access-Control-Allow-Origin: *) because this never
 runs anywhere but localhost during development — tighten this before any
@@ -101,7 +103,12 @@ def link_bond():
     if not deal_id.isdigit() or not contract_address:
         return jsonify({"error": "numeric dealId and contractAddress are required"}), 400
     try:
-        row = bonds.link_contract_address(deal_id, contract_address)
+        row = bonds.link_contract_address(
+            deal_id, contract_address,
+            trigger_address=body.get("triggerAddress"),
+            product_id=body.get("productId"),
+            product_version=body.get("productVersion"),
+        )
     except bonds.BondNotFound:
         return jsonify({"error": "bond not found"}), 404
     return jsonify({"ok": True, "bond": row})

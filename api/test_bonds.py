@@ -102,6 +102,22 @@ def test_link_patches_by_id_accepting_string_id(captured):
     assert calls[0]["json"] == {"contract_address": "0xabc"}
 
 
+def test_link_includes_trigger_details_when_given(captured):
+    calls, responses = captured
+    responses.append(_FakeResp([{"id": 42}]))
+    bonds.link_contract_address(42, "0xbond", trigger_address="0xtrig",
+                                product_id="natcat_loss", product_version="3")
+    assert calls[0]["json"] == {"contract_address": "0xbond", "trigger_address": "0xtrig",
+                                "product_id": "natcat_loss", "product_version": 3}
+
+
+def test_link_leaves_unset_trigger_details_untouched(captured):
+    calls, responses = captured
+    responses.append(_FakeResp([{"id": 42}]))
+    bonds.link_contract_address(42, "0xbond", trigger_address="", product_id=None)
+    assert calls[0]["json"] == {"contract_address": "0xbond"}
+
+
 def test_get_missing_bond_raises_not_found(captured):
     _, responses = captured
     responses.append(_FakeResp([]))
@@ -135,10 +151,12 @@ def test_live_round_trip():
         cedant="pytest", description="throwaway", maturity="2027-01-01", value=1))
     try:
         addr = "0x" + secrets.token_hex(20)
-        bonds.link_contract_address(row["id"], addr)
+        bonds.link_contract_address(row["id"], addr, trigger_address="0xtrig",
+                                    product_id="natcat_loss", product_version=3)
         bonds.update_bond_status(row["id"], bonds.STATUS_TRIGGERED)
         got = bonds.get_bond(str(row["id"]))
         assert got["contract_address"] == addr
+        assert (got["trigger_address"], got["product_id"], got["product_version"]) == ("0xtrig", "natcat_loss", 3)
         assert got["status_triggered"] == bonds.STATUS_TRIGGERED
         assert str(got["maturity"]) == "2027-01-01"
         assert any(b["id"] == row["id"] for b in bonds.list_bonds("natcat"))

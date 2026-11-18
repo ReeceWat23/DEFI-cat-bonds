@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount, useConnect, useDisconnect, useDeployContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useDeployContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
 import { injected } from 'wagmi/connectors'
 import { isAddress } from 'viem'
 import { FilledButton, GhostButton, Panel } from './primitives'
-import { CATBOND_ABI, CATBOND_BYTECODE, TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
+import { CATBOND_ABI, CATBOND_BYTECODE, TRIGGER_ABI, TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
 import { REGIONS } from '../../data/regionTaxonomy'
 import { TRIGGER_TYPES } from '../../data/historicalLoss'
 import { parseUSDC, formatUSDC, daysToSeconds } from '../../lib/utils'
@@ -41,7 +41,7 @@ function estimateMaturityDate() {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-async function createDealRecord({ website, description, raise }) {
+async function createDealRecord({ website, description, raise, trigger }) {
   const res = await fetch(BONDS_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -50,6 +50,9 @@ async function createDealRecord({ website, description, raise }) {
       description,
       maturity: estimateMaturityDate(),
       value: raise,
+      triggerAddress: trigger.address,
+      productId: trigger.productId,
+      productVersion: trigger.productVersion,
     }),
   })
   if (!res.ok) throw new Error(`create-bond failed (${res.status})`)
@@ -60,6 +63,18 @@ async function createDealRecord({ website, description, raise }) {
 
 function ConnectButton() {
   const { address, isConnected } = useAccount()
+
+  // The bond record stores which trigger (and product version) the bond
+  // settles on. Read from the trigger itself rather than assuming the
+  // current product version: a canonical trigger can predate the latest
+  // product (e.g. a v2 trigger after v3 shipped).
+  const { data: triggerProductConfig } = useReadContract({
+    address: triggerAddr ?? undefined,
+    abi: TRIGGER_ABI,
+    functionName: 'productConfig',
+    query: { enabled: !!triggerAddr },
+  })
+  const [triggerProductId, triggerProductVersion] = triggerProductConfig ?? []
   const { connect } = useConnect()
   const { disconnect } = useDisconnect()
   if (isConnected) {
@@ -92,6 +107,18 @@ export default function ReviewSection({ state, network }) {
   // bond of that type, is the whole feature. See constants/abis.js.
   const triggerAddr = triggerType ? CANONICAL_TRIGGERS[triggerType.id] : null
   const { address, isConnected } = useAccount()
+
+  // The bond record stores which trigger (and product version) the bond
+  // settles on. Read from the trigger itself rather than assuming the
+  // current product version: a canonical trigger can predate the latest
+  // product (e.g. a v2 trigger after v3 shipped).
+  const { data: triggerProductConfig } = useReadContract({
+    address: triggerAddr ?? undefined,
+    abi: TRIGGER_ABI,
+    functionName: 'productConfig',
+    query: { enabled: !!triggerAddr },
+  })
+  const [triggerProductId, triggerProductVersion] = triggerProductConfig ?? []
 
   const [usdcAddr, setUsdcAddr] = useState('')
 
@@ -143,7 +170,14 @@ export default function ReviewSection({ state, network }) {
     const description = lossHistory ? `${summary}\n\nLoss history: ${lossHistory}` : summary
     let newDealId
     try {
-      newDealId = await createDealRecord({ website: state.disclosure.website, description, raise: layer.raise })
+      newDealId = await createDealRecord({
+        website: state.disclosure.website, description, raise: layer.raise,
+        trigger: {
+          address: triggerAddr,
+          productId: triggerProductId,
+          productVersion: triggerProductVersion !== undefined ? Number(triggerProductVersion) : undefined,
+        },
+      })
     } catch (e) {
       setCreatingBond(false)
       setRecordError(e.message || String(e))

@@ -150,10 +150,25 @@ def create_bond(bond: dict) -> dict:
     return _request("POST", body=bond, return_rows=True)[0]
 
 
-def link_contract_address(bond_id, contract_address: str) -> dict:
-    """Attach the deployed CatBond address to a bond row. Returns the updated row."""
-    rows = _request("PATCH", params={"id": f"eq.{int(bond_id)}"},
-                    body={"contract_address": contract_address}, return_rows=True)
+def link_contract_address(
+    bond_id,
+    contract_address: str,
+    trigger_address: str | None = None,
+    product_id: str | None = None,
+    product_version: int | None = None,
+) -> dict:
+    """
+    Attach the deployed CatBond address to a bond row, plus (optionally) the
+    trigger it settles on and that trigger's product. Fields left as None are
+    not touched, so a record that already has trigger details keeps them.
+    Returns the updated row.
+    """
+    body = {"contract_address": contract_address}
+    for col, val in (("trigger_address", trigger_address), ("product_id", product_id),
+                     ("product_version", product_version)):
+        if val not in (None, ""):
+            body[col] = int(val) if col == "product_version" else val
+    rows = _request("PATCH", params={"id": f"eq.{int(bond_id)}"}, body=body, return_rows=True)
     return _single(rows, bond_id)
 
 

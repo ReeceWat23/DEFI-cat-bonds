@@ -14,7 +14,9 @@ actually landed, rather than trusting a deploy receipt:
      orphaned.
   3. Parse the deployed CatBond's address out of Foundry's broadcast
      artifact (not stdout — structured, not regex-fragile).
-  4. Link that address back onto the Bond record (bonds.link_contract_address).
+  4. Link that address back onto the Bond record (bonds.link_contract_address),
+     along with the trigger the bond settles on: CatBond.trigger() and that
+     trigger's productConfig() product id/version, read from the chain.
   5. Verify: read the deployed contract's dealId/sellerName back over RPC
      and confirm they match. A successful transaction proves the write
      happened, not that it landed where expected — this is the actual
@@ -80,6 +82,26 @@ def find_deployed_catbond_address() -> str:
     raise RuntimeError(f"No CatBond deployment found in {broadcast_path}")
 
 
+def read_trigger_details(bond_address: str) -> tuple[str, str, int]:
+    """
+    (trigger_address, product_id, product_version) for a deployed CatBond,
+    read from the chain: the bond's trigger() and that trigger's
+    productConfig(). Ground truth, not whatever version this script expects.
+    """
+    trigger_address = subprocess.run(
+        ["cast", "call", bond_address, "trigger()(address)", "--rpc-url", RPC_URL],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    raw = subprocess.run(
+        ["cast", "call", trigger_address,
+         "productConfig()(string,uint256,string,string,uint256,bytes32)",
+         "--rpc-url", RPC_URL, "--json"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    product_id, version, *_ = json.loads(raw)
+    return trigger_address, product_id, int(version)
+
+
 def cast_call_string(address: str, signature: str) -> str:
     result = subprocess.run(
         ["cast", "call", address, signature, "--rpc-url", RPC_URL],
@@ -113,8 +135,14 @@ def main():
     bond_address = find_deployed_catbond_address()
     print(f"CatBond address: {bond_address}")
 
-    print("\n── 4. Link address back onto the bond record (web2) ─────")
-    link_resp = bonds.link_contract_address(deal_id, bond_address)
+    trigger_address, product_id, product_version = read_trigger_details(bond_address)
+    print(f"Trigger: {trigger_address} ({product_id} v{product_version})")
+
+    print("\n── 4. Link address + trigger back onto the bond record ───")
+    link_resp = bonds.link_contract_address(
+        deal_id, bond_address,
+        trigger_address=trigger_address, product_id=product_id, product_version=product_version,
+    )
     print(json.dumps(link_resp, indent=2, default=str))
 
     print("\n── 5. Verify: read the deployed contract back ───────────")
@@ -127,8 +155,12 @@ def main():
         raise SystemExit(
             f"VERIFICATION FAILED: contract dealId {onchain_deal_id!r} != web2 dealId {deal_id!r}"
         )
+    record = bonds.get_bond(deal_id)
+    if (record["trigger_address"] or "").lower() != trigger_address.lower() or \
+            record["product_id"] != product_id or record["product_version"] != product_version:
+        raise SystemExit(f"VERIFICATION FAILED: record trigger details don't match the chain: {record}")
 
-    print("\nVerification passed — dealId embedded on-chain matches the web2 record.")
+    print("\nVerification passed — dealId and trigger details match between chain and record.")
     print(f"\nDeal {deal_id}  <->  CatBond {bond_address}")
 
 
