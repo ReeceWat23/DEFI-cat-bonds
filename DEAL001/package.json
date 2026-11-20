@@ -1,0 +1,20 @@
+{
+  "name": "deal001-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Client codegen and local-validator setup for the cat_bond Solana program",
+  "scripts": {
+    "codegen": "node scripts/generate-client.mjs",
+    "localnet": "./scripts/localnet.sh",
+    "setup:local": "tsx scripts/setup-local.ts"
+  },
+  "devDependencies": {
+    "@codama/nodes-from-anchor": "1.5.6",
+    "@codama/renderers-js": "2.9.1",
+    "@solana-program/system": "0.16.0",
+    "@solana-program/token": "0.18.0",
+    "@solana/kit": "8.6.0",
+    "codama": "1.11.0",
+    "tsx": "^4.21.0"
+  }
+}

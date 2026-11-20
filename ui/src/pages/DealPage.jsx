@@ -607,7 +607,7 @@ export default function DealPage() {
 
   function loadBond() {
     const ref = makeBondRef(bondInput)
-    if (!ref) return alert('Invalid Ethereum address')
+    if (!ref) return alert('Not a valid bond address. Paste an EVM (0x…) or Solana address.')
     setBondRef(ref)
     localStorage.setItem('catbond_address', bondInput)
     setDepositInput('')
@@ -634,7 +634,7 @@ export default function DealPage() {
           <div className="flex items-center gap-5">
             <ThemeSwitcher />
             <Link to="/admin" className="text-sm text-[var(--rhodex-text-dark-muted)] hover:text-[var(--rhodex-text-dark)] transition-colors">Admin ›</Link>
-            <ConnectButton />
+            <ConnectButton family={bondRef?.family} />
           </div>
         </div>
       </header>
@@ -651,7 +651,7 @@ export default function DealPage() {
               value={bondInput}
               onChange={e => setBondInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && loadBond()}
-              placeholder="Paste CatBond contract address to load deal…"
+              placeholder="Paste a bond address (EVM 0x… or Solana) to load deal…"
               className="flex-1 min-w-0 bg-transparent font-mono text-sm text-[var(--rhodex-text-dark)] placeholder:text-[var(--rhodex-text-dark-muted)] outline-none"
             />
             <ActionButton size="px-3 py-1.5 text-xs" onClick={loadBond}>
@@ -829,7 +829,7 @@ export default function DealPage() {
                     ) : (
                       <div className="text-center py-4">
                         <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-3">Connect your wallet to invest in this bond.</p>
-                        <ConnectButton />
+                        <ConnectButton family={bondRef?.family} />
                       </div>
                     )}
                   </div>
@@ -969,7 +969,7 @@ export default function DealPage() {
               {!isConnected && (
                 <Surface className="p-5 text-center">
                   <p className="text-sm text-[var(--rhodex-text-dark-muted)] mb-3">Connect your wallet to see your position.</p>
-                  <ConnectButton />
+                  <ConnectButton family={bondRef?.family} />
                 </Surface>
               )}
 

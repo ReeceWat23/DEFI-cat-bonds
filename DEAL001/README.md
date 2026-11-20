@@ -65,11 +65,28 @@ avm install 1.2.2 && avm use 1.2.2
 anchor build && anchor keys sync && anchor build                  # real program ID
 ```
 
+## Local environment (Solana counterpart of DEAL 000's `run.sh`)
+
+```bash
+cd DEAL001
+npm install            # once
+npm run codegen        # after every `anchor build`: regenerates the typed @solana/kit client
+npm run localnet       # fresh validator + RDX mint + 2 triggers + test bond + funded wallets
+npm run localnet -- quick   # same, with a 1-min subscription / 5-min term
+```
+
+`npm run localnet` mirrors DEAL 000's test deal: the same product, terms and seller (Raydion, $500k coverage, 8% coupon, $370B economic-loss trigger). It writes:
+
+- `ui/src/chains/solana/localnet.json`: public addresses. The UI picks it up automatically, so paste the printed bond address into `/deal`.
+- `.localnet/wallets.txt`: company / sponsor / investor secret keys to import into a browser wallet. These are local test keys only. The wallet keypairs persist across runs (`.localnet/keys/`); the mint, triggers and bond are recreated every run.
+
+The generated client is written to both `clients/js/generated/` (scripts) and `ui/src/chains/solana/generated/` (UI), so each resolves `@solana/kit` from its own `node_modules`. Never edit either by hand.
+
 ## TODO
 
 - [x] Install the toolchain, `anchor build`, `anchor keys sync` → program ID `3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj`
 - [ ] Port the Foundry suite (`DEAL 000/test/CatBond.t.sol`, ~70 tests) to LiteSVM integration tests
-- [ ] Local deal setup script (equivalent of `DEAL 000/script/Setup.s.sol` + `run.sh`): RDX mint, trigger, bond, funded wallets
+- [x] Local deal setup script (equivalent of `DEAL 000/script/Setup.s.sol` + `run.sh`): `npm run localnet`
 - [ ] UI: swap wagmi deploy/calls for a Solana wallet adapter + generated client in `ui/`
 
 ## Future ideas

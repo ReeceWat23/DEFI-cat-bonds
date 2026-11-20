@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 .env.local
+
+# Written by DEAL001/scripts/setup-local.ts on every localnet run
+src/chains/solana/localnet.json
