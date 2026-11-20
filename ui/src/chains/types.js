@@ -34,6 +34,7 @@ export const FAMILY = Object.freeze({ EVM: 'evm', SOLANA: 'solana' })
  * @property {string}  checkedBy
  *
  * @typedef {object} BondView     Fields are undefined while loading or if a read fails.
+ * @property {boolean} exists     false = no bond at this address on the connected network
  * @property {number}  status     STATUS index 0–4
  * @property {string}  sponsor
  * @property {string}  companyWallet
@@ -63,9 +64,16 @@ export const FAMILY = Object.freeze({ EVM: 'evm', SOLANA: 'solana' })
  * @property {bigint|null} tokenAllowance  null on chains with no approve step
  *
  * @typedef {object} TriggerView
+ * @property {boolean} exists      false = no trigger at this address on the connected network
  * @property {bigint}  reportCount
- * @property {{value: bigint, reportedAt: bigint}|undefined} latest
+ * @property {{value: bigint, reportedAt: bigint}|undefined} latest  undefined until the first report
+ * @property {string}  productId
+ * @property {bigint}  version
  * @property {string}  valuePath
+ * @property {string}  units
+ * @property {bigint}  maxReportAge  seconds
+ * @property {string}  reporter
+ * @property {string}  owner
  *
  * @typedef {object} TxState
  * @property {boolean} isWriting     waiting on the wallet

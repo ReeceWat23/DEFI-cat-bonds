@@ -2,13 +2,14 @@
 // Solana library directly (DEAL001/PLAN-multichain-ui.md §2).
 //
 // Every hook calls each family's hook unconditionally (rules of hooks) and
-// passes null to the families the bond isn't on; the inactive ones do no
-// network work. The Solana branch slots in alongside `evm` in Phase C.
+// passes null to the families it isn't for; the inactive ones do no network
+// work. The Solana branch slots in alongside `evm` in Phase C.
 
 import { FAMILY } from './types'
 import {
-  isEvmAddress, evmErrorName,
-  useEvmWallet, useEvmBond, useEvmTrigger, useEvmPosition, useEvmActions,
+  isEvmAddress, sameEvmAddress, evmErrorName,
+  useEvmWallet, useEvmBond, useEvmTrigger, useEvmTriggerHistory, useEvmPosition,
+  useEvmActions, useEvmTriggerActions, useEvmCreateTrigger, useEvmCreateBond,
 } from './evm/adapter'
 
 export { STATUS, FAMILY } from './types'
@@ -21,6 +22,30 @@ const ADDRESS_CHECKS = {
   // [FAMILY.SOLANA]: isSolanaAddress,   ← Phase C
 }
 
+// ── Addresses ────────────────────────────────────────────────────────────────
+
+/** Which enabled family an address belongs to, or null if it's not valid on any. */
+export function addressFamily(input) {
+  const address = String(input ?? '').trim()
+  return ENABLED_FAMILIES.find(f => ADDRESS_CHECKS[f]?.(address)) ?? null
+}
+
+/** Is `input` a valid address — on `family` if given, else on any enabled family? */
+export function isValidAddress(input, family) {
+  const f = addressFamily(input)
+  return f !== null && (family === undefined || f === family)
+}
+
+/**
+ * Address equality. EVM hex is case-insensitive; Solana base58 is
+ * case-sensitive, so never lower-case a non-hex address.
+ */
+export function sameAddress(a, b) {
+  if (!a || !b) return false
+  if (isEvmAddress(a) && isEvmAddress(b)) return sameEvmAddress(a, b)
+  return a === b
+}
+
 /**
  * Turns a pasted address into a BondRef, or null if it isn't a valid address
  * on any enabled family.
@@ -28,13 +53,14 @@ const ADDRESS_CHECKS = {
  */
 export function makeBondRef(input, network = null) {
   const address = String(input ?? '').trim()
-  for (const family of ENABLED_FAMILIES) {
-    if (ADDRESS_CHECKS[family]?.(address)) return { family, network, address }
-  }
-  return null
+  const family = addressFamily(address)
+  return family ? { family, network, address } : null
 }
 
 const on = (ref, family) => (ref?.family === family ? ref : null)
+const onFamily = (family, wanted, value) => (family === wanted ? value : undefined)
+
+// ── Wallet ───────────────────────────────────────────────────────────────────
 
 /** The connected wallet for one chain family. */
 export function useWallet(family = FAMILY.EVM) {
@@ -42,14 +68,23 @@ export function useWallet(family = FAMILY.EVM) {
   return family === FAMILY.EVM ? evm : { address: undefined, isConnected: false, connect() {}, disconnect() {} }
 }
 
+// ── Reads ────────────────────────────────────────────────────────────────────
+
 /** @param {import('./types').BondRef|null} ref */
 export function useBond(ref) {
   const evm = useEvmBond(on(ref, FAMILY.EVM))
   return evm
 }
 
-export function useBondTrigger(ref, triggerAddress) {
-  const evm = useEvmTrigger(ref?.family === FAMILY.EVM ? triggerAddress : undefined)
+/** @returns {{ trigger: import('./types').TriggerView|undefined, refetch: Function }} */
+export function useTrigger(family, triggerAddress) {
+  const evm = useEvmTrigger(onFamily(family, FAMILY.EVM, triggerAddress))
+  return evm
+}
+
+/** Newest-first `{value, reportedAt}` list, up to `limit`, read only while `enabled`. */
+export function useTriggerHistory(family, triggerAddress, reportCount, opts) {
+  const evm = useEvmTriggerHistory(onFamily(family, FAMILY.EVM, triggerAddress), reportCount, opts)
   return evm
 }
 
@@ -58,9 +93,28 @@ export function useBondPosition(ref, owner, mint) {
   return evm
 }
 
+// ── Writes ───────────────────────────────────────────────────────────────────
+
 export function useBondActions(ref, mint) {
   const evm = useEvmActions(on(ref, FAMILY.EVM), mint)
   return evm
+}
+
+export function useTriggerActions(family = FAMILY.EVM) {
+  const evm = useEvmTriggerActions()
+  return family === FAMILY.EVM ? evm : undefined
+}
+
+/** `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's JSDoc. */
+export function useCreateTrigger(family = FAMILY.EVM) {
+  const evm = useEvmCreateTrigger()
+  return family === FAMILY.EVM ? evm : undefined
+}
+
+/** `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's JSDoc. */
+export function useCreateBond(family = FAMILY.EVM) {
+  const evm = useEvmCreateBond()
+  return family === FAMILY.EVM ? evm : undefined
 }
 
 /**

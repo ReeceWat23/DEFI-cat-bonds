@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  useWallet, useBond, useBondTrigger, useBondPosition, useBondActions,
-  makeBondRef, errorName,
+  useWallet, useBond, useTrigger, useBondPosition, useBondActions,
+  makeBondRef, sameAddress, errorName,
 } from '../chains'
 import { ActionButton, Surface, Tag } from '../theme/primitives'
 import { useTheme } from '../theme/ThemeProvider'
@@ -534,7 +534,7 @@ export default function DealPage() {
 
   // ── Trigger reads — the trigger is an append-only report log (§2.4), not
   // a triggered flag; same source AdminPage's ManageSection reads. ──
-  const { trigger: triggerData, refetch: refetchTrigger } = useBondTrigger(bondRef, triggerAddr)
+  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(bondRef?.family, triggerAddr)
   const reportCount = triggerData?.reportCount
   const latestValue = triggerData?.latest?.value
   const valuePath   = triggerData?.valuePath
@@ -563,8 +563,8 @@ export default function DealPage() {
   const statusNum  = Number(status ?? 0)
   const isBusy     = isWriting || isConfirming
   const now        = BigInt(Math.floor(Date.now() / 1000))
-  const isSponsor  = !!address && !!sponsor  && address.toLowerCase() === sponsor.toLowerCase()
-  const isCompany  = !!address && !!companyWallet && address.toLowerCase() === companyWallet.toLowerCase()
+  const isSponsor  = sameAddress(address, sponsor)
+  const isCompany  = sameAddress(address, companyWallet)
 
   // Trigger type + threshold — threshold now lives on the bond (§2.5), not
   // the trigger; dealType is gone entirely, replaced by matching the
@@ -663,7 +663,14 @@ export default function DealPage() {
         {/* Tx banner — spans full width */}
         {bondAddress && <TxBanner isWriting={isWriting} isConfirming={isConfirming} isConfirmed={isConfirmed} hash={txHash} error={writeError} />}
 
-        {bondAddress && bondData && (
+        {bondAddress && bondData && bondData.exists === false && (
+          <Surface rounded="rounded-[10px]" className="p-5 text-sm text-red-700">
+            No CatBond found at <span className="font-mono">{bondAddress}</span> on the connected network. Check the
+            address, or that your wallet is on the network the bond was deployed to.
+          </Surface>
+        )}
+
+        {bondAddress && bondData?.exists && (
           <div className="grid lg:grid-cols-3 gap-5">
 
             {/* ── LEFT COLUMN (2/3) ────────────────────────────────────── */}

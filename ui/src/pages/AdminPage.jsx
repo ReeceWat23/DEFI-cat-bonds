@@ -1,14 +1,11 @@
 import { useState, useEffect } from 'react'
-import {
-  useAccount, useConnect, useDisconnect,
-  useReadContracts, useReadContract,
-  useWriteContract, useWaitForTransactionReceipt,
-  useDeployContract,
-} from 'wagmi'
-import { injected } from 'wagmi/connectors'
 import { Link } from 'react-router-dom'
-import { isAddress, keccak256, toHex } from 'viem'
-import { CATBOND_ABI, CATBOND_BYTECODE, TRIGGER_ABI, TRIGGER_BYTECODE, ERC20_ABI, TESTNET_USDC, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../constants/abis'
+import {
+  useWallet, useBond, useTrigger, useTriggerHistory, useBondPosition,
+  useBondActions, useTriggerActions, useCreateTrigger, useCreateBond,
+  makeBondRef, isValidAddress, sameAddress, FAMILY,
+} from '../chains'
+import { TESTNET_USDC, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../constants/abis'
 import {
   formatUSDC, safeParseUSDC, parseUSDC, formatDate, formatBps, formatAge,
   statusLabel, statusColor, daysToSeconds, formatUSDWhole,
@@ -26,12 +23,14 @@ import LiveBondsMap from '../components/build-bond/LiveBondsMap'
 // every --wkb-* token and helper class index.css already defines, with
 // zero duplication and zero drift if that palette ever changes.
 
+// Chain every Admin section acts on. EVM until the Admin network dropdown
+// lands (multi-chain plan Phase D).
+const ADMIN_FAMILY = FAMILY.EVM
+
 // ── Shared components ─────────────────────────────────────────────────────────
 
 function ConnectButton() {
-  const { address, isConnected } = useAccount()
-  const { connect } = useConnect()
-  const { disconnect } = useDisconnect()
+  const { address, isConnected, connect, disconnect } = useWallet(ADMIN_FAMILY)
 
   if (isConnected) {
     return (
@@ -41,7 +40,7 @@ function ConnectButton() {
       </div>
     )
   }
-  return <GhostButton highlight onClick={() => connect({ connector: injected() })}>Connect wallet</GhostButton>
+  return <GhostButton highlight onClick={() => connect()}>Connect wallet</GhostButton>
 }
 
 function FormField({ label, value, onChange, type = 'text', placeholder = '', hint, className = '' }) {
@@ -134,7 +133,7 @@ function PasswordGate({ onUnlock }) {
 // ── Deploy Section ────────────────────────────────────────────────────────────
 
 function DeploySection() {
-  const { address, isConnected } = useAccount()
+  const { address, isConnected } = useWallet(ADMIN_FAMILY)
 
   const [form, setForm] = useState({
     sponsor: '',
@@ -169,73 +168,70 @@ function DeploySection() {
     }
   }, [address])
 
-  // Trigger deploy
+  // Trigger creation (a contract deploy on EVM)
+  const createTrigger = useCreateTrigger(ADMIN_FAMILY)
   const {
-    deployContract: deployTrigger,
-    isPending: triggerPending,
-    data: triggerTxHash,
-    error: triggerError,
-  } = useDeployContract()
-  const {
-    isLoading: triggerConfirming,
-    isSuccess: triggerConfirmed,
-    data: triggerReceipt,
-  } = useWaitForTransactionReceipt({ hash: triggerTxHash })
+    isWriting: triggerPending, isConfirming: triggerConfirming, isConfirmed: triggerConfirmed,
+    hash: triggerTxHash, error: triggerError,
+  } = createTrigger.tx
 
   useEffect(() => {
-    if (triggerConfirmed && triggerReceipt?.contractAddress) {
-      const addr = triggerReceipt.contractAddress
+    if (createTrigger.createdAddress) {
+      const addr = createTrigger.createdAddress
       setTriggerAddr(addr)
       localStorage.setItem('catbond_trigger', addr)
     }
-  }, [triggerConfirmed, triggerReceipt])
+  }, [createTrigger.createdAddress])
 
-  // Bond deploy
+  // Bond creation
+  const createBond = useCreateBond(ADMIN_FAMILY)
   const {
-    deployContract: deployBond,
-    isPending: bondPending,
-    data: bondTxHash,
-    error: bondError,
-  } = useDeployContract()
-  const {
-    isLoading: bondConfirming,
-    isSuccess: bondConfirmed,
-    data: bondReceipt,
-  } = useWaitForTransactionReceipt({ hash: bondTxHash })
+    isWriting: bondPending, isConfirming: bondConfirming, isConfirmed: bondConfirmed,
+    hash: bondTxHash, error: bondError,
+  } = createBond.tx
 
   useEffect(() => {
-    if (bondConfirmed && bondReceipt?.contractAddress) {
-      const addr = bondReceipt.contractAddress
+    if (createBond.createdAddress) {
+      const addr = createBond.createdAddress
       setBondAddr(addr)
       localStorage.setItem('catbond_address', addr)
     }
-  }, [bondConfirmed, bondReceipt])
+  }, [createBond.createdAddress])
 
   const set = key => e => setForm(f => ({ ...f, [key]: e.target.value }))
 
+  // Saved addresses can outlive the chain they were deployed on (every anvil
+  // restart wipes state), so check something actually lives at each one.
+  // `exists` is undefined while loading, false when nothing is there.
+  const { trigger: savedTrigger } = useTrigger(ADMIN_FAMILY, isValidAddress(triggerAddr, ADMIN_FAMILY) ? triggerAddr : undefined)
+  const { bond: savedBond } = useBond(makeBondRef(bondAddr))
+  const triggerMissing = !!triggerAddr && savedTrigger?.exists === false
+  const bondMissing    = !!bondAddr && savedBond?.exists === false
+
   function handleDeployTrigger() {
-    if (!isAddress(form.companyWallet)) return alert('Enter a valid company wallet address')
+    if (!isValidAddress(form.companyWallet, ADMIN_FAMILY)) return alert('Enter a valid company wallet address')
     // dealType still selects which of the product's two metrics this
     // trigger reports on — it's just a valuePath snapshot now, not a
     // constructor arg the trigger stores directly. See historicalLoss.js.
     const triggerType = form.dealType === '0' ? TRIGGER_TYPES.industry : TRIGGER_TYPES.economic
-    deployTrigger({
-      abi: TRIGGER_ABI,
-      bytecode: TRIGGER_BYTECODE,
-      args: [
-        form.companyWallet, form.companyWallet, // owner, reporter — single wallet for now
-        NATCAT_LOSS_PRODUCT.productId, NATCAT_LOSS_PRODUCT.version,
-        triggerType.valuePath, NATCAT_LOSS_PRODUCT.units,
-        NATCAT_LOSS_PRODUCT.maxReportAgeSeconds, NATCAT_LOSS_PRODUCT.endpoint,
-      ],
+    createTrigger.create({
+      owner:        form.companyWallet,   // owner and reporter — single wallet for now
+      reporter:     form.companyWallet,
+      productId:    NATCAT_LOSS_PRODUCT.productId,
+      version:      NATCAT_LOSS_PRODUCT.version,
+      valuePath:    triggerType.valuePath,
+      units:        NATCAT_LOSS_PRODUCT.units,
+      maxReportAge: NATCAT_LOSS_PRODUCT.maxReportAgeSeconds,
+      endpoint:     NATCAT_LOSS_PRODUCT.endpoint,
     })
   }
 
   function handleDeployBond() {
     if (!triggerAddr) return alert('Deploy trigger first (Step 1)')
-    if (!isAddress(form.sponsor)) return alert('Invalid sponsor address')
-    if (!isAddress(form.companyWallet)) return alert('Invalid company wallet address')
-    if (!isAddress(form.usdc)) return alert('Invalid USDC address')
+    if (triggerMissing) return alert(`No trigger found at ${triggerAddr} on the connected network — it's probably from an earlier chain. Run Step 1 to deploy a fresh one.`)
+    if (!isValidAddress(form.sponsor, ADMIN_FAMILY)) return alert('Invalid sponsor address')
+    if (!isValidAddress(form.companyWallet, ADMIN_FAMILY)) return alert('Invalid company wallet address')
+    if (!isValidAddress(form.usdc, ADMIN_FAMILY)) return alert('Invalid USDC address')
     const thresholdB = parseFloat(form.lossThresholdB)
     if (!form.lossThresholdB || isNaN(thresholdB) || thresholdB <= 0)
       return alert('Enter a loss threshold in billions (e.g. 370 for $370B)')
@@ -246,13 +242,28 @@ function DeploySection() {
       const minInv = parseUSDC(form.minInvestment)
       const subDur = daysToSeconds(form.subDays)
       const termDur = daysToSeconds(form.termDays)
-      deployBond({
-        abi: CATBOND_ABI,
-        bytecode: CATBOND_BYTECODE,
-        args: [
-          form.sponsor, form.companyWallet, triggerAddr, threshold, form.usdc, couponBps, coverage, minInv, subDur, termDur,
-          form.sellerName, form.dealId, [],
-        ],
+      // Same sanity rules the Solana program enforces in create_bond. On EVM a
+      // negative value otherwise only fails inside viem's uint256 encoder,
+      // with an unhelpful "not in safe 256-bit unsigned integer range" error.
+      if (!(subDur > 0n)) return alert('Subscription duration must be more than 0 days')
+      if (!(termDur > 0n)) return alert('Term duration must be more than 0 days')
+      if (!(coverage > 0n)) return alert('Coverage amount must be more than 0')
+      if (!(minInv > 0n) || minInv > coverage) return alert('Min investment must be more than 0 and no larger than the coverage amount')
+      if (isNaN(couponBps) || couponBps < 0 || couponBps > 10000) return alert('Coupon rate must be between 0 and 10000 BPS')
+      createBond.create({
+        sponsor:              form.sponsor,
+        companyWallet:        form.companyWallet,
+        trigger:              triggerAddr,
+        threshold,
+        mint:                 form.usdc,
+        couponRateBps:        couponBps,
+        coverageAmount:       coverage,
+        minInvestment:        minInv,
+        subscriptionDuration: subDur,
+        termDuration:         termDur,
+        sellerName:           form.sellerName,
+        dealId:               form.dealId,
+        exposure:             [],
       })
     } catch (e) {
       alert('Invalid parameter: ' + e.message)
@@ -419,8 +430,14 @@ function DeploySection() {
               <span className="wkb-mono">natcat_loss</span> product.
               Threshold is set on the bond in Step 2, not here — one trigger can back bonds at different thresholds.
             </div>
-            {triggerAddr && (
+            {triggerAddr && !triggerMissing && (
               <div className="wkb-mono text-xs text-[var(--wkb-blue)] mt-1 break-all">✓ {triggerAddr}</div>
+            )}
+            {triggerMissing && (
+              <div className="text-xs text-red-600 mt-1 break-all">
+                ✗ <span className="wkb-mono">{triggerAddr}</span> — no trigger at this address on the connected network
+                (saved from an earlier chain?). Deploy a fresh one.
+              </div>
             )}
           </div>
           <GhostButton
@@ -442,13 +459,18 @@ function DeploySection() {
       </div>
 
       {/* Step 2: Deploy Bond */}
-      <div className="rounded-[10px] border border-[var(--wkb-hairline)] p-4" style={{ background: 'var(--wkb-panel)', opacity: triggerAddr ? 1 : 0.5 }}>
+      <div className="rounded-[10px] border border-[var(--wkb-hairline)] p-4" style={{ background: 'var(--wkb-panel)', opacity: triggerAddr && !triggerMissing ? 1 : 0.5 }}>
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-[var(--wkb-ink)]">Step 2 — Deploy CatBond</div>
             <div className="text-xs text-[var(--wkb-ink-muted)] mt-0.5">Uses trigger address from Step 1.</div>
-            {bondAddr && (
+            {bondAddr && !bondMissing && (
               <div className="wkb-mono text-xs text-[var(--wkb-blue)] mt-1 break-all">✓ {bondAddr}</div>
+            )}
+            {bondMissing && (
+              <div className="text-xs text-red-600 mt-1 break-all">
+                ✗ <span className="wkb-mono">{bondAddr}</span> — no bond at this address on the connected network.
+              </div>
             )}
           </div>
           <FilledButton
@@ -468,7 +490,7 @@ function DeploySection() {
         />
       </div>
 
-      {bondAddr && (
+      {bondAddr && !bondMissing && !triggerMissing && (
         <div className="mt-4 rounded-[10px] border border-green-200 bg-green-50 p-4 text-sm">
           <div className="font-semibold text-green-700 mb-2">Deployment complete — addresses saved.</div>
           <div className="space-y-1 wkb-mono text-xs text-[var(--wkb-ink-muted)]">
@@ -518,69 +540,42 @@ function triggerTypeLabelFromValuePath(valuePath) {
 }
 
 function ManageSection() {
-  const { address, isConnected } = useAccount()
+  const { address, isConnected } = useWallet(ADMIN_FAMILY)
 
   const [bondAddress, setBondAddress] = useState(localStorage.getItem('catbond_address') || '')
   const [triggerAddress, setTriggerAddress] = useState(localStorage.getItem('catbond_trigger') || '')
   const [reportLossB, setReportLossB] = useState('')
   const [reportNote, setReportNote] = useState('')
 
-  const validBond = isAddress(bondAddress)
-  const validTrigger = isAddress(triggerAddress)
+  const bondRef = makeBondRef(bondAddress)
+  const validBond = !!bondRef && bondRef.family === ADMIN_FAMILY
+  const validTrigger = isValidAddress(triggerAddress, ADMIN_FAMILY)
 
   // Bond reads — includes the bond's own trigger address so we always check the right contract.
   // threshold/lastCheck are new (§2.5) — the bond now owns its own threshold
   // and records the result of every checkTrigger() call.
-  const { data: bondData, refetch: refetchBond } = useReadContracts({
-    contracts: validBond
-      ? [
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'status' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'sponsor' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'companyWallet' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'usdc' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'requiredCouponBudget' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'totalDeposited' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'coverageAmount' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'maturity' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'trigger' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'threshold' },
-          { address: bondAddress, abi: CATBOND_ABI, functionName: 'lastCheck' },
-        ]
-      : [],
-  })
-
-  const [
-    bondStatus, bondSponsor, bondCompany, bondUsdc, requiredCouponBudget, totalDeposited,
-    coverageAmount, maturity, bondTriggerAddr, bondThreshold, lastCheck,
-  ] = bondData?.map(r => r.result) ?? []
-  const [, , lastCheckTriggered, lastCheckAt] = lastCheck ?? []
+  const { bond: bondData, refetch: refetchBond } = useBond(validBond ? bondRef : null)
+  const {
+    status: bondStatus, sponsor: bondSponsor, companyWallet: bondCompany, mint: bondUsdc,
+    requiredCouponBudget, totalDeposited, coverageAmount, maturity,
+    trigger: bondTriggerAddr, threshold: bondThreshold, lastCheck,
+  } = bondData ?? {}
+  const lastCheckTriggered = lastCheck?.triggered
+  const lastCheckAt        = lastCheck?.checkedAt
   const hasBeenChecked = lastCheckAt !== undefined && Number(lastCheckAt) > 0
 
   // Always read from the address the bond holds — never the UI input — to prevent mismatches.
   const effectiveTriggerAddr = bondTriggerAddr ?? (validTrigger ? triggerAddress : undefined)
 
-  // reportCount/productConfig/maxReportAge are always answerable; latestReport
-  // reverts with NoReports when the log is empty — that one read simply comes
-  // back undefined in that case rather than throwing, so no special handling
-  // is needed beyond checking hasReports before trusting it.
-  const { data: triggerData, refetch: refetchTrigger } = useReadContracts({
-    contracts: effectiveTriggerAddr
-      ? [
-          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'reportCount' },
-          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'latestReport' },
-          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'maxReportAge' },
-          { address: effectiveTriggerAddr, abi: TRIGGER_ABI, functionName: 'productConfig' },
-        ]
-      : [],
-  })
-  const [reportCount, latestReport, maxReportAge, productConfig] = triggerData?.map(r => r.result) ?? []
-  // latestReport() returns a single Report struct, not multiple flat
-  // outputs like productConfig/lastCheck below — viem decodes a lone
-  // struct output as a named object ({value, reportedAt, ...}), not an
-  // array, so this reads fields by name rather than destructuring by index.
-  const latestValue = latestReport?.value
-  const latestReportedAt = latestReport?.reportedAt
-  const [productId, productVersion, valuePath] = productConfig ?? []
+  // `latest` is undefined while the report log is empty, so check hasReports
+  // before trusting it.
+  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(ADMIN_FAMILY, effectiveTriggerAddr)
+  const reportCount      = triggerData?.reportCount
+  const latestValue      = triggerData?.latest?.value
+  const latestReportedAt = triggerData?.latest?.reportedAt
+  const productId        = triggerData?.productId
+  const productVersion   = triggerData?.version
+  const valuePath        = triggerData?.valuePath
   const hasReports = reportCount !== undefined && Number(reportCount) > 0
 
   // Gas-free, client-side comparison — NOT the on-chain confirmed answer.
@@ -596,18 +591,12 @@ function ManageSection() {
   const healthColor = { Healthy: 'bg-green-100 text-green-800', Watch: 'bg-amber-100 text-amber-800', Triggered: 'bg-red-100 text-red-800' }[health]
 
   // USDC allowance/balance for the connected wallet (sponsor flow)
-  const { data: usdcData, refetch: refetchUsdc } = useReadContracts({
-    contracts: bondUsdc && address && validBond
-      ? [
-          { address: bondUsdc, abi: ERC20_ABI, functionName: 'allowance', args: [address, bondAddress] },
-          { address: bondUsdc, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] },
-        ]
-      : [],
-  })
-  const [usdcAllowance, usdcBalance] = usdcData?.map(r => r.result) ?? []
+  const { position, refetch: refetchUsdc } = useBondPosition(validBond ? bondRef : null, address, bondUsdc)
+  const usdcAllowance = position?.tokenAllowance
+  const usdcBalance   = position?.tokenBalance
 
-  const { writeContract, isPending, data: txHash, error: writeError } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash })
+  const actions = useBondActions(validBond ? bondRef : null, bondUsdc)
+  const { isWriting: isPending, isConfirming, isConfirmed, hash: txHash, error: writeError } = actions.tx
   const isBusy = isPending || isConfirming
 
   useEffect(() => {
@@ -615,8 +604,8 @@ function ManageSection() {
   }, [isConfirmed])
 
   const statusNum = Number(bondStatus ?? 0)
-  const isCompanyWallet = address && bondCompany && address.toLowerCase() === bondCompany.toLowerCase()
-  const isSponsor = address && bondSponsor && address.toLowerCase() === bondSponsor.toLowerCase()
+  const isCompanyWallet = sameAddress(address, bondCompany)
+  const isSponsor = sameAddress(address, bondSponsor)
   const now = BigInt(Math.floor(Date.now() / 1000))
   const pastMaturity = maturity && Number(maturity) > 0 && now >= maturity
 
@@ -624,9 +613,9 @@ function ManageSection() {
     if (!requiredCouponBudget) return
     const totalNeeded = (requiredCouponBudget * 10050n) / 10000n
     if ((usdcAllowance ?? 0n) < totalNeeded) {
-      writeContract({ address: bondUsdc, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, totalNeeded * 2n] })
+      actions.approve(totalNeeded * 2n)
     } else {
-      writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'fundCouponBudget' })
+      actions.fundCouponBudget()
     }
   }
 
@@ -651,7 +640,15 @@ function ManageSection() {
       </div>
 
       {/* Bond state summary */}
-      {bondData && validBond && (
+      {bondData && validBond && bondData.exists === false && (
+        <div className="rounded-[10px] p-4 mb-5 border border-red-200 bg-red-50 text-sm text-red-700">
+          No CatBond found at <span className="wkb-mono">{bondAddress}</span> on the connected network.
+          It may be from an earlier anvil run, a deploy that reverted, or a different chain — check
+          the address, or deploy a new bond in section 01.
+        </div>
+      )}
+
+      {bondData && validBond && bondData.exists && (
         <div className="rounded-[10px] p-4 mb-5 border border-[var(--wkb-hairline)] text-sm space-y-2" style={{ background: 'var(--wkb-panel)' }}>
           <div className="flex flex-wrap gap-3 items-center">
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusColor(bondStatus)}`}>
@@ -715,7 +712,7 @@ function ManageSection() {
               <div className="text-[var(--wkb-ink-muted)]">No reports posted to this trigger yet.</div>
             )}
             {bondTriggerAddr && validTrigger &&
-              bondTriggerAddr.toLowerCase() !== triggerAddress.toLowerCase() && (
+              !sameAddress(bondTriggerAddr, triggerAddress) && (
               <div className="text-amber-600 mt-1">
                 ⚠ Trigger address field doesn't match the bond's trigger. Actions will use your field value; status above reflects the bond's actual trigger.
               </div>
@@ -758,7 +755,7 @@ function ManageSection() {
         <AdminAction
           title="Close Subscription"
           description="Anyone can call this once the subscription window closes. Starts the active bond phase and refunds unused coupon budget."
-          onClick={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'closeSubscription' })}
+          onClick={() => actions.closeSubscription()}
           disabled={isBusy || !isConnected || statusNum !== 1}
           label="Close Subscription"
         />
@@ -767,7 +764,7 @@ function ManageSection() {
         <AdminAction
           title="Mark Matured"
           description={`Company wallet confirms the bond has matured (after ${maturity && Number(maturity) > 0 ? formatDate(maturity) : 'maturity'}). Enables investor principal withdrawals.`}
-          onClick={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'markMatured' })}
+          onClick={() => actions.markMatured()}
           disabled={isBusy || !isConnected || !isCompanyWallet || statusNum !== 2 || !pastMaturity}
           label="Mark Matured"
         />
@@ -776,7 +773,7 @@ function ManageSection() {
         <AdminAction
           title="Settle (Trigger Fired)"
           description={`Company wallet calls checkTrigger() and, if it comes back true, transfers all investor principal to the sponsor. Reverts on-chain if the trigger hasn't actually fired — the button doesn't pre-block on a possibly-stale local read.${likelyTriggered === false ? ' Latest report is currently below threshold.' : ''}`}
-          onClick={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'settle' })}
+          onClick={() => actions.settle()}
           disabled={isBusy || !isConnected || !isCompanyWallet || statusNum !== 2}
           label="Settle — Send Principal to Sponsor"
           danger
@@ -790,7 +787,7 @@ function ManageSection() {
         <AdminAction
           title="Self-check (checkTrigger)"
           description="Anyone can call this — pulls the trigger's latest report since this bond went Active, reverts if stale or missing, and records the confirmed result as lastCheck above."
-          onClick={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'checkTrigger' })}
+          onClick={() => actions.checkTrigger()}
           disabled={isBusy || !isConnected || statusNum < 2}
           label="Run checkTrigger()"
         />
@@ -840,13 +837,7 @@ function ManageSection() {
                   const lossB = parseFloat(reportLossB)
                   if (isNaN(lossB) || lossB <= 0) return alert('Enter a loss value in billions')
                   const lossUSD = BigInt(Math.round(lossB * 1e9))
-                  const monitorRef = keccak256(toHex(reportNote.trim() || 'manual-admin-report'))
-                  writeContract({
-                    address: triggerAddress,
-                    abi: TRIGGER_ABI,
-                    functionName: 'postReport',
-                    args: [lossUSD, monitorRef],
-                  })
+                  actions.postReport(triggerAddress, lossUSD, reportNote)
                 }}
                 disabled={isBusy || !isConnected || !validTrigger}
               >
@@ -882,36 +873,21 @@ function formatDuration(seconds) {
 function TriggerCard({ label, address }) {
   const [expanded, setExpanded] = useState(false)
   const [testThreshold, setTestThreshold] = useState('')
-  const { writeContract, isPending, data: txHash, error: writeError } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash })
+  const triggerActions = useTriggerActions(ADMIN_FAMILY)
+  const { isWriting: isPending, isConfirming, isConfirmed, hash: txHash, error: writeError } = triggerActions.tx
   const [reportLossB, setReportLossB] = useState('')
   const [reportNote, setReportNote] = useState('')
 
-  const { data, refetch } = useReadContracts({
-    contracts: [
-      { address, abi: TRIGGER_ABI, functionName: 'productConfig' },
-      { address, abi: TRIGGER_ABI, functionName: 'reportCount' },
-      { address, abi: TRIGGER_ABI, functionName: 'latestReport' },
-      { address, abi: TRIGGER_ABI, functionName: 'reporter' },
-      { address, abi: TRIGGER_ABI, functionName: 'owner' },
-    ],
-  })
-  const [productConfig, reportCount, latestReport, reporter, owner] = data?.map(r => r.result) ?? []
-  const [productId, productVersion, valuePath, units, maxReportAge, endpointHash] = productConfig ?? []
-  // Single struct output -> named object, not an array (see the matching
-  // comment in ManageSection above).
-  const latestValue = latestReport?.value
-  const latestReportedAt = latestReport?.reportedAt
+  const { trigger, refetch } = useTrigger(ADMIN_FAMILY, address)
+  const {
+    productId, version: productVersion, valuePath, units, maxReportAge,
+    reportCount, reporter, owner,
+  } = trigger ?? {}
+  const latestValue = trigger?.latest?.value
+  const latestReportedAt = trigger?.latest?.reportedAt
   const hasReports = reportCount !== undefined && Number(reportCount) > 0
-  const count = Number(reportCount ?? 0)
 
-  const historyContracts = expanded
-    ? Array.from({ length: Math.min(count, 10) }, (_, i) => ({
-        address, abi: TRIGGER_ABI, functionName: 'reports', args: [BigInt(count - 1 - i)],
-      }))
-    : []
-  const { data: historyData } = useReadContracts({ contracts: historyContracts })
-  const history = historyData?.map(r => r.result) ?? []
+  const history = useTriggerHistory(ADMIN_FAMILY, address, reportCount, { limit: 10, enabled: expanded })
 
   const now = Math.floor(Date.now() / 1000)
   const secondsUntilStale = hasReports && maxReportAge !== undefined
@@ -974,7 +950,7 @@ function TriggerCard({ label, address }) {
             ) : (
               <div className="space-y-1 text-xs">
                 {history.map((r, i) => {
-                  const [value, reportedAt] = r ?? []
+                  const { value, reportedAt } = r ?? {}
                   return (
                     <div key={i} className="flex justify-between wkb-tabular">
                       <span className="text-[var(--wkb-ink)]">{formatUSDWhole(value)}</span>
@@ -1015,8 +991,7 @@ function TriggerCard({ label, address }) {
                 const lossB = parseFloat(reportLossB)
                 if (isNaN(lossB) || lossB <= 0) return
                 const lossUSD = BigInt(Math.round(lossB * 1e9))
-                const monitorRef = keccak256(toHex(reportNote.trim() || 'manual-admin-report'))
-                writeContract({ address, abi: TRIGGER_ABI, functionName: 'postReport', args: [lossUSD, monitorRef] })
+                triggerActions.postReport(address, lossUSD, reportNote)
               }}
               disabled={isPending || isConfirming || !reportLossB}
             >

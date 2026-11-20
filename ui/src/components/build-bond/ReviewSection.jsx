@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount, useConnect, useDisconnect, useDeployContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
-import { injected } from 'wagmi/connectors'
-import { isAddress } from 'viem'
+import { useWallet, useTrigger, useCreateBond, isValidAddress, FAMILY } from '../../chains'
 import { FilledButton, GhostButton, Panel } from './primitives'
-import { CATBOND_ABI, CATBOND_BYTECODE, TRIGGER_ABI, TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
+import { TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
 import { REGIONS } from '../../data/regionTaxonomy'
 import { TRIGGER_TYPES } from '../../data/historicalLoss'
 import { parseUSDC, formatUSDC, daysToSeconds } from '../../lib/utils'
@@ -36,6 +34,10 @@ function guessSellerName(website) {
 // a script.
 const BONDS_API = 'http://localhost:5001/bonds'
 
+// Chain the deal is posted on. EVM until the Section 03 chain picker lands
+// (multi-chain plan Phase D, where the default becomes Solana).
+const FAMILY_FOR_POST = FAMILY.EVM
+
 function estimateMaturityDate() {
   const days = SUBSCRIPTION_DAYS + TERM_DAYS
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
@@ -61,22 +63,8 @@ async function createDealRecord({ website, description, raise, trigger }) {
   return data.dealId
 }
 
-function ConnectButton() {
-  const { address, isConnected } = useAccount()
-
-  // The bond record stores which trigger (and product version) the bond
-  // settles on. Read from the trigger itself rather than assuming the
-  // current product version: a canonical trigger can predate the latest
-  // product (e.g. a v2 trigger after v3 shipped).
-  const { data: triggerProductConfig } = useReadContract({
-    address: triggerAddr ?? undefined,
-    abi: TRIGGER_ABI,
-    functionName: 'productConfig',
-    query: { enabled: !!triggerAddr },
-  })
-  const [triggerProductId, triggerProductVersion] = triggerProductConfig ?? []
-  const { connect } = useConnect()
-  const { disconnect } = useDisconnect()
+function ConnectButton({ family }) {
+  const { address, isConnected, connect, disconnect } = useWallet(family)
   if (isConnected) {
     return (
       <div className="flex items-center gap-3">
@@ -85,7 +73,7 @@ function ConnectButton() {
       </div>
     )
   }
-  return <GhostButton highlight onClick={() => connect({ connector: injected() })}>Connect wallet</GhostButton>
+  return <GhostButton highlight onClick={() => connect()}>Connect wallet</GhostButton>
 }
 
 function Block({ title, children }) {
@@ -106,27 +94,24 @@ export default function ReviewSection({ state, network }) {
   // canonical, already-reported-to trigger per type, shared by every public
   // bond of that type, is the whole feature. See constants/abis.js.
   const triggerAddr = triggerType ? CANONICAL_TRIGGERS[triggerType.id] : null
-  const { address, isConnected } = useAccount()
+  const family = FAMILY_FOR_POST
+  const { address, isConnected } = useWallet(family)
 
   // The bond record stores which trigger (and product version) the bond
   // settles on. Read from the trigger itself rather than assuming the
   // current product version: a canonical trigger can predate the latest
   // product (e.g. a v2 trigger after v3 shipped).
-  const { data: triggerProductConfig } = useReadContract({
-    address: triggerAddr ?? undefined,
-    abi: TRIGGER_ABI,
-    functionName: 'productConfig',
-    query: { enabled: !!triggerAddr },
-  })
-  const [triggerProductId, triggerProductVersion] = triggerProductConfig ?? []
+  const { trigger: canonicalTrigger } = useTrigger(family, triggerAddr ?? undefined)
+  const triggerProductId = canonicalTrigger?.productId
+  const triggerProductVersion = canonicalTrigger?.version
+  // CANONICAL_TRIGGERS are hard-coded per chain; after an anvil restart they
+  // point at nothing, and CatBond's constructor rejects them (InvalidTrigger).
+  const triggerMissing = !!triggerAddr && canonicalTrigger?.exists === false
 
   const [usdcAddr, setUsdcAddr] = useState('')
 
-  const {
-    deployContract: deployBond, isPending: bondPending, data: bondTxHash, error: bondError,
-  } = useDeployContract()
-  const { isLoading: bondConfirming, isSuccess: bondConfirmed, data: bondReceipt } =
-    useWaitForTransactionReceipt({ hash: bondTxHash })
+  const createBond = useCreateBond(family)
+  const { isWriting: bondPending, isConfirming: bondConfirming, error: bondError } = createBond.tx
 
   const [bondAddr, setBondAddr] = useState(null)
   const [dealId, setDealId] = useState(null)
@@ -134,8 +119,8 @@ export default function ReviewSection({ state, network }) {
   const [recordError, setRecordError] = useState(null)
 
   useEffect(() => {
-    if (bondConfirmed && bondReceipt?.contractAddress) {
-      const addr = bondReceipt.contractAddress
+    if (createBond.createdAddress) {
+      const addr = createBond.createdAddress
       setBondAddr(addr)
       localStorage.setItem('catbond_address', addr)
       localStorage.setItem('catbond_trigger', triggerAddr)
@@ -153,7 +138,7 @@ export default function ReviewSection({ state, network }) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bondConfirmed, bondReceipt])
+  }, [createBond.createdAddress])
 
   if (!layer) {
     return <p className="text-sm text-[var(--wkb-ink-muted)]">Confirm a layer in Section 01 to review your deal.</p>
@@ -186,26 +171,27 @@ export default function ReviewSection({ state, network }) {
     setDealId(newDealId)
     setCreatingBond(false)
 
-    const args = [
-      address, RHODEX_COMPANY_WALLET, triggerAddr,
-      BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
-      usdcAddr,
-      Math.round(layer.coupon * 100),
-      parseUSDC(String(layer.raise)),
-      parseUSDC(String(MIN_INVESTMENT_USD)),
-      daysToSeconds(SUBSCRIPTION_DAYS),
-      daysToSeconds(TERM_DAYS),
-      guessSellerName(state.disclosure.website),
-      newDealId,
-      state.disclosure.sov.regions.map(r => ({ region: r.country, pct: r.exposurePct })),
-    ]
-    deployBond({ abi: CATBOND_ABI, bytecode: CATBOND_BYTECODE, args })
+    createBond.create({
+      sponsor:              address,
+      companyWallet:        RHODEX_COMPANY_WALLET,
+      trigger:              triggerAddr,
+      threshold:            BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
+      mint:                 usdcAddr,
+      couponRateBps:        Math.round(layer.coupon * 100),
+      coverageAmount:       parseUSDC(String(layer.raise)),
+      minInvestment:        parseUSDC(String(MIN_INVESTMENT_USD)),
+      subscriptionDuration: daysToSeconds(SUBSCRIPTION_DAYS),
+      termDuration:         daysToSeconds(TERM_DAYS),
+      sellerName:           guessSellerName(state.disclosure.website),
+      dealId:               newDealId,
+      exposure:             state.disclosure.sov.regions.map(r => ({ region: r.country, pct: r.exposurePct })),
+    })
   }
 
   const currencyLabel = network === 'mainnet' ? 'USDC' : 'RDX'
   const listingFee = Math.round(layer.raise * 0.0005)
   const isBusy = bondPending || bondConfirming || creatingBond
-  const canPost = isConnected && isAddress(usdcAddr) && !!triggerAddr && !isBusy && !bondAddr
+  const canPost = isConnected && isValidAddress(usdcAddr, family) && !!triggerAddr && !triggerMissing && !isBusy && !bondAddr
   const error = bondError
 
   if (bondAddr) {
@@ -266,7 +252,7 @@ export default function ReviewSection({ state, network }) {
 
       <Block title="Ship it">
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <ConnectButton />
+          <ConnectButton family={family} />
         </div>
         <label className="block text-xs text-[var(--wkb-ink-muted)] mb-1.5">{currencyLabel} address</label>
         <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -293,11 +279,18 @@ export default function ReviewSection({ state, network }) {
         {!usdcAddr && (
           <p className="text-xs text-red-600 mb-3">Pick a {currencyLabel} address above — "Post deal" won't do anything until it's set.</p>
         )}
-        {usdcAddr && !isAddress(usdcAddr) && (
+        {usdcAddr && !isValidAddress(usdcAddr, family) && (
           <p className="text-xs text-red-600 mb-3">That doesn't look like a valid address.</p>
         )}
         {!triggerAddr && (
           <p className="text-xs text-red-600 mb-3">No canonical trigger configured for this deal type yet.</p>
+        )}
+        {triggerMissing && (
+          <p className="text-xs text-red-600 mb-3">
+            The canonical {triggerType?.label.toLowerCase()} trigger (<span className="wkb-mono">{triggerAddr}</span>) doesn't
+            exist on the connected network — after an anvil restart, redeploy it and update{' '}
+            <code className="wkb-mono">CANONICAL_TRIGGERS</code> in <code className="wkb-mono">constants/abis.js</code>.
+          </p>
         )}
         {recordError && (
           <p className="text-xs text-red-600 mb-3">

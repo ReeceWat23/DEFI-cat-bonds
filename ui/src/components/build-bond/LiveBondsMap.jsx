@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useReadContracts } from 'wagmi'
-import { TRIGGER_ABI, CANONICAL_TRIGGERS } from '../../constants/abis'
+import { useTrigger, FAMILY } from '../../chains'
+import { CANONICAL_TRIGGERS } from '../../constants/abis'
 import { formatUSDWhole, formatAge } from '../../lib/utils'
 import DOTS from '../../data/worldDots.json'
 
@@ -48,10 +48,13 @@ function useNatcatBonds() {
   return { bonds, error }
 }
 
+// Most recent of several triggers' latest reports ({value, reportedAt}).
+// Reports used to be read here as viem tuples (r[0]/r[1]), but latestReport()
+// returns a named struct, so the chip never showed a value until Phase B.
 function latestOf(reports) {
   return reports.reduce((best, r) => {
     if (!r) return best
-    if (!best || Number(r[1]) > Number(best[1])) return r
+    if (!best || Number(r.reportedAt) > Number(best.reportedAt)) return r
     return best
   }, null)
 }
@@ -75,13 +78,10 @@ export default function LiveBondsMap() {
   const totalValue = (bonds ?? []).reduce((sum, b) => sum + (Number(b.value) || 0), 0)
   const animatedValue = useCountUp(bonds ? totalValue : null)
 
-  const { data: reportData } = useReadContracts({
-    contracts: [
-      { address: CANONICAL_TRIGGERS.economic, abi: TRIGGER_ABI, functionName: 'latestReport' },
-      { address: CANONICAL_TRIGGERS.industry, abi: TRIGGER_ABI, functionName: 'latestReport' },
-    ],
-  })
-  const latest = latestOf(reportData?.map(r => r.result) ?? [])
+  // Canonical triggers are EVM-only until the registry gains Solana entries (Phase C).
+  const { trigger: economic } = useTrigger(FAMILY.EVM, CANONICAL_TRIGGERS.economic)
+  const { trigger: industry } = useTrigger(FAMILY.EVM, CANONICAL_TRIGGERS.industry)
+  const latest = latestOf([economic?.latest, industry?.latest])
 
   return (
     <div className="mb-8">
@@ -127,7 +127,7 @@ export default function LiveBondsMap() {
             style={{ background: 'var(--wkb-panel-raised)', color: 'var(--wkb-blue)' }}
           >
             {latest ? (
-              <>Latest report: {formatUSDWhole(latest[0])} ({formatAge(latest[1])})</>
+              <>Latest report: {formatUSDWhole(latest.value)} ({formatAge(latest.reportedAt)})</>
             ) : (
               <>Latest report: —</>
             )}
