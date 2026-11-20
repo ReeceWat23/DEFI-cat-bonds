@@ -1,12 +1,9 @@
 import { useState, useEffect } from 'react'
-import {
-  useAccount, useConnect, useDisconnect,
-  useReadContracts, useWriteContract, useWaitForTransactionReceipt,
-} from 'wagmi'
-import { injected } from 'wagmi/connectors'
 import { Link } from 'react-router-dom'
-import { isAddress } from 'viem'
-import { CATBOND_ABI, TRIGGER_ABI, ERC20_ABI } from '../constants/abis'
+import {
+  useWallet, useBond, useBondTrigger, useBondPosition, useBondActions,
+  makeBondRef, errorName,
+} from '../chains'
 import { ActionButton, Surface, Tag } from '../theme/primitives'
 import { useTheme } from '../theme/ThemeProvider'
 import ThemeSwitcher from '../theme/ThemeSwitcher'
@@ -64,16 +61,13 @@ const REVERT_MESSAGES = {
 
 function parseError(err) {
   if (!err) return null
-  const name = err?.cause?.data?.errorName || err?.cause?.name || ''
-  return REVERT_MESSAGES[name] || err?.shortMessage || err?.message || String(err)
+  return REVERT_MESSAGES[errorName(err)] || err?.shortMessage || err?.message || String(err)
 }
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-function ConnectButton() {
-  const { address, isConnected } = useAccount()
-  const { connect }    = useConnect()
-  const { disconnect } = useDisconnect()
+function ConnectButton({ family }) {
+  const { address, isConnected, connect, disconnect } = useWallet(family)
   if (isConnected) return (
     <div className="flex items-center gap-3">
       <span className="text-sm font-mono text-[var(--rhodex-text-dark-muted)]">{address?.slice(0,6)}...{address?.slice(-4)}</span>
@@ -83,7 +77,7 @@ function ConnectButton() {
     </div>
   )
   return (
-    <ActionButton size="px-4 py-2 text-sm" onClick={() => connect({ connector: injected() })}>
+    <ActionButton size="px-4 py-2 text-sm" onClick={() => connect()}>
       Connect Wallet
     </ActionButton>
   )
@@ -356,7 +350,7 @@ function TriggerWidget({ triggerType, thresholdB, reportedB, hasBeenChecked, las
 
 // ── Deposit two-step ──────────────────────────────────────────────────────────
 
-function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, tokenAllowance, tokenBalance, minInvestment, coverageAmount, totalDeposited, writeContract, isBusy, isConfirmed, writeError }) {
+function DepositFlow({ actions, depositAmount, depositTotal, tokenAllowance, tokenBalance, minInvestment, coverageAmount, totalDeposited, isBusy, isConfirmed, writeError }) {
   const [flow, setFlow] = useState('idle')
 
   useEffect(() => {
@@ -408,7 +402,7 @@ function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, token
             {needsApprove && (
               <ActionButton
                 tone="accent"
-                onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, depositTotal * 10n] }) }}
+                onClick={() => { setFlow('approving'); actions.approve(depositTotal * 10n) }}
                 disabled={isBusy}
               >
                 {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
@@ -418,7 +412,7 @@ function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, token
               <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
             )}
             <ActionButton
-              onClick={() => { setFlow('depositing'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'deposit', args: [depositAmount, depositAmount] }) }}
+              onClick={() => { setFlow('depositing'); actions.deposit(depositAmount, depositAmount) }}
               disabled={isBusy || needsApprove}
             >
               {flow === 'depositing' && isBusy ? 'Depositing…' : '② Deposit'}
@@ -433,7 +427,7 @@ function DepositFlow({ bondAddress, usdcAddr, depositAmount, depositTotal, token
 
 // ── Fund coupon budget two-step ───────────────────────────────────────────────
 
-function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeContract, isBusy, isConfirmed }) {
+function FundFlow({ actions, budgetWithFee, tokenAllowance, isBusy, isConfirmed }) {
   const [flow, setFlow] = useState('idle')
 
   useEffect(() => {
@@ -465,7 +459,7 @@ function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeC
         {needsApprove && (
           <ActionButton
             tone="accent"
-            onClick={() => { setFlow('approving'); writeContract({ address: usdcAddr, abi: ERC20_ABI, functionName: 'approve', args: [bondAddress, budgetWithFee * 10n] }) }}
+            onClick={() => { setFlow('approving'); actions.approve(budgetWithFee * 10n) }}
             disabled={isBusy}
           >
             {flow === 'approving' && isBusy ? 'Approving…' : '① Approve Token'}
@@ -475,7 +469,7 @@ function FundFlow({ bondAddress, usdcAddr, budgetWithFee, tokenAllowance, writeC
           <span className="text-xs text-green-600 font-medium bg-green-50 border-2 border-green-200 px-2 py-1">✓ Approved</span>
         )}
         <ActionButton
-          onClick={() => { setFlow('funding'); writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'fundCouponBudget' }) }}
+          onClick={() => { setFlow('funding'); actions.fundCouponBudget() }}
           disabled={isBusy || needsApprove}
         >
           {flow === 'funding' && isBusy ? 'Funding…' : '② Fund Coupon Budget'}
@@ -495,49 +489,27 @@ const INPUT_CLASS = {
 
 export default function DealPage() {
   const { themeId } = useTheme()
-  const { address, isConnected } = useAccount()
   const [bondInput,   setBondInput]   = useState('')
-  const [bondAddress, setBondAddress] = useState(null)
+  const [bondRef,     setBondRef]     = useState(null)
   const [depositInput, setDepositInput] = useState('')
+  const bondAddress = bondRef?.address ?? null
+  const { address, isConnected } = useWallet(bondRef?.family)
 
   useEffect(() => {
     const saved = localStorage.getItem('catbond_address')
-    if (saved && isAddress(saved)) { setBondAddress(saved); setBondInput(saved) }
+    const ref = saved && makeBondRef(saved)
+    if (ref) { setBondRef(ref); setBondInput(saved) }
   }, [])
 
-  // ── Contract reads ────────────────────────────────────────────────────────
-  const { data: bondData, refetch: refetchBond } = useReadContracts({
-    contracts: bondAddress ? [
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'status' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'sponsor' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'companyWallet' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'usdc' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'couponRateBps' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'coverageAmount' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'minInvestment' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'requiredCouponBudget' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'subscriptionEnd' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'maturity' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'settlementTime' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'totalDeposited' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'termDuration' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'trigger' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'threshold' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'lastCheck' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'sellerName' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'verified' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'getExposure' },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'dealId' },
-    ] : [],
-  })
-
-  const [
-    status, sponsor, companyWallet, usdcAddr,
+  // ── Chain reads (via the chains/ adapter — no ABI knowledge in this page) ──
+  const { bond: bondData, refetch: refetchBond } = useBond(bondRef)
+  const {
+    status, sponsor, companyWallet, mint: usdcAddr,
     couponRateBps, coverageAmount, minInvestment, requiredCouponBudget,
-    subscriptionEnd, maturity, settlementTime, totalDeposited, termDuration,
-    triggerAddr, bondThreshold, lastCheck, sellerName, verified, exposureRaw,
-    dealId,
-  ] = bondData?.map(r => r.result) ?? []
+    subscriptionEnd, settlementTime, totalDeposited, termDuration,
+    trigger: triggerAddr, threshold: bondThreshold, lastCheck, sellerName, verified,
+    exposure: exposureRegions, dealId,
+  } = bondData ?? {}
 
   // The workshop's Post deal embeds dealId on-chain (Deal Page — Dynamic
   // Data v2, §3.3); an empty string means this bond predates that wiring
@@ -557,45 +529,26 @@ export default function DealPage() {
     return () => { cancelled = true }
   }, [dealId])
 
-  const [, , lastCheckTriggered, lastCheckAt] = lastCheck ?? []
+  const lastCheckTriggered = lastCheck?.triggered
+  const lastCheckAt        = lastCheck?.checkedAt
 
-  const exposureRegions = (exposureRaw ?? []).map(r => ({ region: r.region, pct: Number(r.pct) }))
-
-  // ── Trigger contract reads — the trigger is now an append-only report log
-  // (§2.4), not a triggered flag. reportCount/latestReport/productConfig
-  // replace dealType/lossLimit/reportedValue/reportedSource/isTriggered —
-  // same source AdminPage's ManageSection reads. ──
-  const { data: triggerData, refetch: refetchTrigger } = useReadContracts({
-    contracts: triggerAddr ? [
-      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'reportCount' },
-      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'latestReport' },
-      { address: triggerAddr, abi: TRIGGER_ABI, functionName: 'productConfig' },
-    ] : [],
-  })
-  const [reportCount, latestReport, productConfig] = triggerData?.map(r => r.result) ?? []
-  // latestReport() has a single Report-struct output, so viem decodes it as
-  // a named object ({value, reportedAt, ...}), not an array like the
-  // multi-output productConfig()/lastCheck() below — read fields by name.
-  const latestValue = latestReport?.value
-  const latestReportedAt = latestReport?.reportedAt
-  const [, , valuePath] = productConfig ?? []
+  // ── Trigger reads — the trigger is an append-only report log (§2.4), not
+  // a triggered flag; same source AdminPage's ManageSection reads. ──
+  const { trigger: triggerData, refetch: refetchTrigger } = useBondTrigger(bondRef, triggerAddr)
+  const reportCount = triggerData?.reportCount
+  const latestValue = triggerData?.latest?.value
+  const valuePath   = triggerData?.valuePath
   const hasReports = reportCount !== undefined && Number(reportCount) > 0
   const hasBeenChecked = lastCheckAt !== undefined && Number(lastCheckAt) > 0
 
-  const { data: userData, refetch: refetchUser } = useReadContracts({
-    contracts: bondAddress && address && usdcAddr ? [
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'principalOf',        args: [address] },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'alreadyClaimed',     args: [address] },
-      { address: bondAddress, abi: CATBOND_ABI, functionName: 'principalWithdrawn', args: [address] },
-      { address: usdcAddr,    abi: ERC20_ABI,   functionName: 'balanceOf',          args: [address] },
-      { address: usdcAddr,    abi: ERC20_ABI,   functionName: 'allowance',          args: [address, bondAddress] },
-    ] : [],
-  })
-  const [principalOf, alreadyClaimed, principalWithdrawn, tokenBalance, tokenAllowance] =
-    userData?.map(r => r.result) ?? []
+  const { position, refetch: refetchUser } = useBondPosition(bondRef, address, usdcAddr)
+  const {
+    principal: principalOf, claimed: alreadyClaimed, withdrawn: principalWithdrawn,
+    tokenBalance, tokenAllowance,
+  } = position ?? {}
 
-  const { writeContract, isPending: isWriting, data: txHash, error: writeError } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash })
+  const actions = useBondActions(bondRef, usdcAddr)
+  const { isWriting, isConfirming, isConfirmed, hash: txHash, error: writeError } = actions.tx
 
   useEffect(() => { if (isConfirmed) { refetchBond(); refetchUser(); refetchTrigger() } }, [isConfirmed])
 
@@ -653,14 +606,11 @@ export default function DealPage() {
     : 0
 
   function loadBond() {
-    if (!isAddress(bondInput)) return alert('Invalid Ethereum address')
-    setBondAddress(bondInput)
+    const ref = makeBondRef(bondInput)
+    if (!ref) return alert('Invalid Ethereum address')
+    setBondRef(ref)
     localStorage.setItem('catbond_address', bondInput)
     setDepositInput('')
-  }
-
-  function write(fn, args) {
-    writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: fn, ...(args ? { args } : {}) })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -803,11 +753,9 @@ export default function DealPage() {
                       <div><div className="text-xs text-[var(--rhodex-accent)]">You pay</div><div className="font-semibold text-[var(--rhodex-accent)]">{formatUSDC(budgetWithFee)}</div></div>
                     </div>
                     <FundFlow
-                      bondAddress={bondAddress}
-                      usdcAddr={usdcAddr}
                       budgetWithFee={budgetWithFee}
                       tokenAllowance={tokenAllowance}
-                      writeContract={writeContract}
+                      actions={actions}
                       isBusy={isBusy}
                       isConfirmed={isConfirmed}
                     />
@@ -844,8 +792,6 @@ export default function DealPage() {
                           </p>
                         )}
                         <DepositFlow
-                          bondAddress={bondAddress}
-                          usdcAddr={usdcAddr}
                           depositAmount={depositAmount}
                           depositTotal={depositTotal}
                           tokenAllowance={tokenAllowance}
@@ -853,7 +799,7 @@ export default function DealPage() {
                           minInvestment={minInvestment}
                           coverageAmount={coverageAmount}
                           totalDeposited={totalDeposited}
-                          writeContract={writeContract}
+                          actions={actions}
                           isBusy={isBusy}
                           isConfirmed={isConfirmed}
                           writeError={writeError}
@@ -862,7 +808,7 @@ export default function DealPage() {
                         {/* Close subscription — anyone can call once full or expired */}
                         {(fullySubscribed || (subscriptionEnd && now >= subscriptionEnd)) && (
                           <div className="mt-5 pt-5 border-t-2 border-[var(--rhodex-text-dark)]/10">
-                            <ActionButton size="px-4 py-2 text-sm" onClick={() => write('closeSubscription')} disabled={isBusy}>
+                            <ActionButton size="px-4 py-2 text-sm" onClick={() => actions.closeSubscription()} disabled={isBusy}>
                               Close Subscription &amp; Activate Bond
                             </ActionButton>
                             <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-1">
@@ -987,7 +933,7 @@ export default function DealPage() {
                   {/* Coupon claim — Active or Triggered. success tone: this is
                       value the investor can take, same as Withdraw below. */}
                   {(statusNum === 2 || statusNum === 4) && (
-                    <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy} className="mb-2">
+                    <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => actions.claimCoupon()} disabled={isBusy} className="mb-2">
                       Claim Coupon
                     </ActionButton>
                   )}
@@ -998,13 +944,13 @@ export default function DealPage() {
                       <ActionButton
                         tone="success"
                         size="w-full py-2.5 text-sm"
-                        onClick={() => write('withdrawPrincipal')}
+                        onClick={() => actions.withdrawPrincipal()}
                         disabled={isBusy || !!principalWithdrawn}
                         className="mb-2"
                       >
                         {principalWithdrawn ? 'Principal Withdrawn ✓' : 'Withdraw Principal'}
                       </ActionButton>
-                      <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => write('claimCoupon')} disabled={isBusy}>
+                      <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => actions.claimCoupon()} disabled={isBusy}>
                         Claim Remaining Coupon
                       </ActionButton>
                     </>
@@ -1032,7 +978,7 @@ export default function DealPage() {
                   triggerState={triggerState}
                   canSelfCheck={isConnected && statusNum >= 2}
                   isBusy={isBusy}
-                  onSelfCheck={() => writeContract({ address: bondAddress, abi: CATBOND_ABI, functionName: 'checkTrigger' })}
+                  onSelfCheck={() => actions.checkTrigger()}
                 />
               )}
 

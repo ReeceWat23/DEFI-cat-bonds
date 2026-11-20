@@ -1,3 +1,4 @@
+// wagmi config — moved unchanged from lib/wagmi.js.
 import { createConfig, http } from 'wagmi'
 import { sepolia, baseSepolia, arbitrumSepolia, foundry } from 'wagmi/chains'
 import { injected } from 'wagmi/connectors'
