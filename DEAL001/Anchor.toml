@@ -1,0 +1,21 @@
+[toolchain]
+anchor_version = "1.2.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+cat_bond = "3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj"
+
+[programs.localnet]
+cat_bond = "3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
+
+[hooks]
