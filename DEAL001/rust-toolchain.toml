@@ -1,0 +1,8 @@
+# Host toolchain for DEAL001 only (rustup applies it inside this folder; the
+# global default is untouched). LiteSVM 0.18 / Agave 4.3 need Rust >= 1.97.1.
+# On-chain builds are unaffected: `anchor build` compiles the program with
+# Solana's bundled platform-tools toolchain.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

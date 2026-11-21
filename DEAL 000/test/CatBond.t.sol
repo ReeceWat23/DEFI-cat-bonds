@@ -67,6 +67,10 @@ contract TestTriggerConfigurable is TriggerBase {
 // Test suite
 // ─────────────────────────────────────────────────────────────────────────────
 contract CatBondTest is Test {
+    // Mirrors of CatBond events for expectEmit (solc 0.8.20 cannot emit CatBond.X).
+    event CouponClaimed(address indexed investor, uint256 amount);
+    event PrincipalWithdrawn(address indexed investor, uint256 amount);
+
 
     // ── shared actors ────────────────────────────────────────────────────────
     address sponsor       = address(0xA1);
@@ -228,9 +232,13 @@ contract CatBondTest is Test {
         vm.prank(investor3);
         bond.withdrawPrincipal();
 
-        // All investor principals returned
-        assertEq(usdc.balanceOf(investor2), 25_000 * 1e6);
-        assertEq(usdc.balanceOf(investor3), 25_000 * 1e6);
+        // investor2/3 never claimed, so withdrawPrincipal() pays their full
+        // coupon along with principal (before the fix it was stranded).
+        assertEq(usdc.balanceOf(investor2), expectedTotal + 25_000 * 1e6);
+        assertEq(usdc.balanceOf(investor3), expectedTotal + 25_000 * 1e6);
+
+        // Everything owed has left the contract.
+        assertEq(usdc.balanceOf(address(bond)), 0);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -461,6 +469,84 @@ contract CatBondTest is Test {
         vm.prank(investor1);
         vm.expectRevert(CatBond.NothingToClaim.selector);
         bond.claimCoupon();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4b. COUPON AFTER MATURITY
+    // Protects: coupon unclaimed at markMatured() is never stranded. Before the
+    // fix claimCoupon() reverted WrongStatus in Matured and withdrawPrincipal()
+    // paid principal only, so it stayed in the contract forever.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @dev Full coupon for a $25k position over the whole term.
+    function _fullCoupon25k() internal pure returns (uint256) {
+        return 25_000 * 1e6 * COUPON_BPS * TERM_DURATION / (10_000 * 365 days);
+    }
+
+    /// @dev Active bond with investor1 in for $25k, at maturity, marked Matured.
+    function _maturedWith25k(bool claimHalfFirst) internal {
+        _sponsorFunds();
+        _investorDeposits(investor1, 25_000 * 1e6);
+        _closeSubscription();
+        if (claimHalfFirst) {
+            vm.warp(bond.activeStart() + TERM_DURATION / 2);
+            vm.prank(investor1);
+            bond.claimCoupon();
+        }
+        vm.warp(bond.maturity());
+        _report(0);
+        vm.prank(companyWallet);
+        bond.markMatured();
+    }
+
+    /// @dev claimCoupon() works in Matured, pays exactly the rest, and stays
+    ///      capped at the full coupon however long after maturity it's called.
+    function test_ClaimCoupon_AfterMarkMatured() public {
+        _maturedWith25k(true);
+        vm.warp(bond.maturity() + 90 days);
+
+        vm.prank(investor1);
+        bond.claimCoupon();
+        assertEq(usdc.balanceOf(investor1), _fullCoupon25k());
+
+        vm.prank(investor1);
+        vm.expectRevert(CatBond.NothingToClaim.selector);
+        bond.claimCoupon();
+
+        // Withdraw then pays principal only — no double-paid coupon.
+        vm.prank(investor1);
+        bond.withdrawPrincipal();
+        assertEq(usdc.balanceOf(investor1), _fullCoupon25k() + 25_000 * 1e6);
+    }
+
+    /// @dev Investor who never claimed gets principal + full coupon in one call.
+    function test_WithdrawPrincipal_PaysUnclaimedCoupon() public {
+        _maturedWith25k(false);
+
+        vm.expectEmit(true, false, false, true, address(bond));
+        emit CouponClaimed(investor1, _fullCoupon25k());
+        vm.expectEmit(true, false, false, true, address(bond));
+        emit PrincipalWithdrawn(investor1, 25_000 * 1e6);
+        vm.prank(investor1);
+        bond.withdrawPrincipal();
+        assertEq(usdc.balanceOf(investor1), _fullCoupon25k() + 25_000 * 1e6);
+
+        // Nothing left to claim afterwards, and the bond is empty.
+        vm.prank(investor1);
+        vm.expectRevert(CatBond.NothingToClaim.selector);
+        bond.claimCoupon();
+        assertEq(usdc.balanceOf(address(bond)), 0);
+    }
+
+    /// @dev Partly claimed: withdraw sweeps exactly the remaining half.
+    function test_WithdrawPrincipal_PaysRemainingCoupon() public {
+        _maturedWith25k(true);
+        uint256 half = usdc.balanceOf(investor1);
+
+        vm.prank(investor1);
+        bond.withdrawPrincipal();
+        assertEq(usdc.balanceOf(investor1) - half, _fullCoupon25k() - half + 25_000 * 1e6);
+        assertEq(usdc.balanceOf(investor1), _fullCoupon25k() + 25_000 * 1e6);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

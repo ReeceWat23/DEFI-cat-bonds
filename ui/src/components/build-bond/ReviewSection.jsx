@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useWallet, useTrigger, useCreateBond, isValidAddress, FAMILY } from '../../chains'
+import { useWallet, useTrigger, useCreateBond, isValidAddress, FAMILY, defaultNetwork } from '../../chains'
 import { FilledButton, GhostButton, Panel } from './primitives'
 import { TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
 import { REGIONS } from '../../data/regionTaxonomy'
@@ -34,9 +34,14 @@ function guessSellerName(website) {
 // a script.
 const BONDS_API = 'http://localhost:5001/bonds'
 
-// Chain the deal is posted on. EVM until the Section 03 chain picker lands
-// (multi-chain plan Phase D, where the default becomes Solana).
-const FAMILY_FOR_POST = FAMILY.EVM
+// Solana network deals are posted to: localnet while DEAL001's validator
+// setup has run, else devnet. Its registry entry supplies the canonical
+// triggers, company wallet and collateral mint (chains/registry.js).
+const SOLANA_NET = defaultNetwork(FAMILY.SOLANA)
+
+// Default chain for Post deal (plan §7.6): Solana whenever a Solana network
+// is configured.
+const DEFAULT_FAMILY = SOLANA_NET ? FAMILY.SOLANA : FAMILY.EVM
 
 function estimateMaturityDate() {
   const days = SUBSCRIPTION_DAYS + TERM_DAYS
@@ -73,7 +78,7 @@ function ConnectButton({ family }) {
       </div>
     )
   }
-  return <GhostButton highlight onClick={() => connect()}>Connect wallet</GhostButton>
+  return <GhostButton highlight onClick={() => connect()}>{family === FAMILY.SOLANA ? 'Connect Solana wallet' : 'Connect wallet'}</GhostButton>
 }
 
 function Block({ title, children }) {
@@ -93,24 +98,34 @@ export default function ReviewSection({ state, network }) {
   // no need for a registry enumerating every trigger ever deployed — one
   // canonical, already-reported-to trigger per type, shared by every public
   // bond of that type, is the whole feature. See constants/abis.js.
-  const triggerAddr = triggerType ? CANONICAL_TRIGGERS[triggerType.id] : null
-  const family = FAMILY_FOR_POST
+  const [family, setFamily] = useState(DEFAULT_FAMILY)
+  const onSolana = family === FAMILY.SOLANA
+  const canonical = onSolana ? (SOLANA_NET?.triggers ?? {}) : CANONICAL_TRIGGERS
+  const triggerAddr = triggerType ? canonical[triggerType.id] ?? null : null
+  const companyWallet = onSolana ? SOLANA_NET?.companyWallet : RHODEX_COMPANY_WALLET
+  const solanaNetId = onSolana ? SOLANA_NET?.id : undefined
   const { address, isConnected } = useWallet(family)
 
   // The bond record stores which trigger (and product version) the bond
   // settles on. Read from the trigger itself rather than assuming the
   // current product version: a canonical trigger can predate the latest
   // product (e.g. a v2 trigger after v3 shipped).
-  const { trigger: canonicalTrigger } = useTrigger(family, triggerAddr ?? undefined)
+  const { trigger: canonicalTrigger } = useTrigger(family, triggerAddr ?? undefined, solanaNetId)
   const triggerProductId = canonicalTrigger?.productId
   const triggerProductVersion = canonicalTrigger?.version
   // CANONICAL_TRIGGERS are hard-coded per chain; after an anvil restart they
   // point at nothing, and CatBond's constructor rejects them (InvalidTrigger).
   const triggerMissing = !!triggerAddr && canonicalTrigger?.exists === false
 
-  const [usdcAddr, setUsdcAddr] = useState('')
+  // Solana: the network's collateral mint is known, so pre-fill it.
+  const [usdcAddr, setUsdcAddr] = useState(onSolana ? SOLANA_NET?.mint ?? '' : '')
+  function chooseChain(next) {
+    if (next === family) return
+    setFamily(next)
+    setUsdcAddr(next === FAMILY.SOLANA ? SOLANA_NET?.mint ?? '' : '')
+  }
 
-  const createBond = useCreateBond(family)
+  const createBond = useCreateBond(family, solanaNetId)
   const { isWriting: bondPending, isConfirming: bondConfirming, error: bondError } = createBond.tx
 
   const [bondAddr, setBondAddr] = useState(null)
@@ -173,7 +188,7 @@ export default function ReviewSection({ state, network }) {
 
     createBond.create({
       sponsor:              address,
-      companyWallet:        RHODEX_COMPANY_WALLET,
+      companyWallet,
       trigger:              triggerAddr,
       threshold:            BigInt(Math.round(layer.triggerLevel * 1e9)), // threshold lives on the bond, not the shared trigger
       mint:                 usdcAddr,
@@ -191,7 +206,7 @@ export default function ReviewSection({ state, network }) {
   const currencyLabel = network === 'mainnet' ? 'USDC' : 'RDX'
   const listingFee = Math.round(layer.raise * 0.0005)
   const isBusy = bondPending || bondConfirming || creatingBond
-  const canPost = isConnected && isValidAddress(usdcAddr, family) && !!triggerAddr && !triggerMissing && !isBusy && !bondAddr
+  const canPost = isConnected && isValidAddress(usdcAddr, family) && !!triggerAddr && !triggerMissing && !!companyWallet && !isBusy && !bondAddr
   const error = bondError
 
   if (bondAddr) {
@@ -251,9 +266,26 @@ export default function ReviewSection({ state, network }) {
       </Block>
 
       <Block title="Ship it">
+        <label className="block text-xs text-[var(--wkb-ink-muted)] mb-1.5">Chain</label>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {SOLANA_NET && (
+            <GhostButton highlight={onSolana} onClick={() => chooseChain(FAMILY.SOLANA)} disabled={isBusy}>
+              Solana · {SOLANA_NET.label.replace(/^Solana /, '')}
+            </GhostButton>
+          )}
+          <GhostButton highlight={!onSolana} onClick={() => chooseChain(FAMILY.EVM)} disabled={isBusy}>
+            EVM
+          </GhostButton>
+        </div>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <ConnectButton family={family} />
         </div>
+        {onSolana && (
+          <p className="text-xs text-[var(--wkb-ink-muted)] mb-3">
+            Your connected Solana wallet signs as the sponsor. Company wallet:{' '}
+            <span className="wkb-mono">{companyWallet ? `${companyWallet.slice(0, 4)}…${companyWallet.slice(-4)}` : 'not configured'}</span>.
+          </p>
+        )}
         <label className="block text-xs text-[var(--wkb-ink-muted)] mb-1.5">{currencyLabel} address</label>
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <input
@@ -261,7 +293,7 @@ export default function ReviewSection({ state, network }) {
             value={usdcAddr}
             onChange={e => setUsdcAddr(e.target.value)}
             disabled={isBusy}
-            placeholder="0x…"
+            placeholder={onSolana ? 'Mint address…' : '0x…'}
             className="w-full sm:w-96 rounded-[8px] border border-[var(--wkb-hairline)] bg-transparent px-3 py-2 text-sm wkb-mono focus:outline-none focus:border-[var(--wkb-ink-muted)] disabled:opacity-50"
           />
           <select
@@ -271,8 +303,14 @@ export default function ReviewSection({ state, network }) {
             className="rounded-[8px] border border-[var(--wkb-hairline)] bg-transparent px-2 py-2 text-xs text-[var(--wkb-ink-muted)] disabled:opacity-50"
           >
             <option value="" disabled>Testnet preset</option>
-            <option value={LOCAL_RDX_TOKEN}>Local (Anvil RDX)</option>
-            {Object.entries(TESTNET_USDC).map(([name, addr]) => <option key={addr} value={addr}>{name}</option>)}
+            {onSolana ? (
+              SOLANA_NET?.mint && <option value={SOLANA_NET.mint}>{SOLANA_NET.environment === 'local' ? 'Local (Solana RDX)' : 'Circle devnet USDC'}</option>
+            ) : (
+              <>
+                <option value={LOCAL_RDX_TOKEN}>Local (Anvil RDX)</option>
+                {Object.entries(TESTNET_USDC).map(([name, addr]) => <option key={addr} value={addr}>{name}</option>)}
+              </>
+            )}
           </select>
         </div>
 
@@ -288,8 +326,10 @@ export default function ReviewSection({ state, network }) {
         {triggerMissing && (
           <p className="text-xs text-red-600 mb-3">
             The canonical {triggerType?.label.toLowerCase()} trigger (<span className="wkb-mono">{triggerAddr}</span>) doesn't
-            exist on the connected network — after an anvil restart, redeploy it and update{' '}
-            <code className="wkb-mono">CANONICAL_TRIGGERS</code> in <code className="wkb-mono">constants/abis.js</code>.
+            exist on the connected network —{' '}
+            {onSolana
+              ? <>restart the local validator with <code className="wkb-mono">npm run localnet</code> in DEAL001.</>
+              : <>after an anvil restart, redeploy it and update <code className="wkb-mono">CANONICAL_TRIGGERS</code> in <code className="wkb-mono">constants/abis.js</code>.</>}
           </p>
         )}
         {recordError && (

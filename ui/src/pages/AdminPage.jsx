@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom'
 import {
   useWallet, useBond, useTrigger, useTriggerHistory, useBondPosition,
   useBondActions, useTriggerActions, useCreateTrigger, useCreateBond,
-  makeBondRef, isValidAddress, sameAddress, FAMILY,
+  makeBondRef, isValidAddress, sameAddress, FAMILY, NETWORKS,
 } from '../chains'
-import { TESTNET_USDC, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../constants/abis'
+import { TESTNET_USDC, RHODEX_COMPANY_WALLET } from '../constants/abis'
 import {
   formatUSDC, safeParseUSDC, parseUSDC, formatDate, formatBps, formatAge,
   statusLabel, statusColor, daysToSeconds, formatUSDWhole,
@@ -23,24 +23,28 @@ import LiveBondsMap from '../components/build-bond/LiveBondsMap'
 // every --wkb-* token and helper class index.css already defines, with
 // zero duplication and zero drift if that palette ever changes.
 
-// Chain every Admin section acts on. EVM until the Admin network dropdown
-// lands (multi-chain plan Phase D).
+// Chain the Deploy section creates on. Manage and Trigger status follow the
+// chain of whatever bond/trigger they're showing; Solana bonds are created
+// from Post deal (/build) or DEAL001's `npm run localnet`.
 const ADMIN_FAMILY = FAMILY.EVM
 
 // ── Shared components ─────────────────────────────────────────────────────────
 
-function ConnectButton() {
-  const { address, isConnected, connect, disconnect } = useWallet(ADMIN_FAMILY)
+function ConnectButton({ family = ADMIN_FAMILY, label }) {
+  const { address, isConnected, connect, disconnect } = useWallet(family)
 
   if (isConnected) {
     return (
       <div className="flex items-center gap-3">
-        <span className="text-sm wkb-mono text-[var(--wkb-ink-muted)]">{address?.slice(0, 6)}...{address?.slice(-4)}</span>
+        <span className="text-sm wkb-mono text-[var(--wkb-ink-muted)]">
+          {label && <span className="font-sans mr-1.5">{label}</span>}
+          {address?.slice(0, 6)}...{address?.slice(-4)}
+        </span>
         <GhostButton onClick={() => disconnect()}>Disconnect</GhostButton>
       </div>
     )
   }
-  return <GhostButton highlight onClick={() => connect()}>Connect wallet</GhostButton>
+  return <GhostButton highlight onClick={() => connect()}>{label ? `Connect ${label}` : 'Connect wallet'}</GhostButton>
 }
 
 function FormField({ label, value, onChange, type = 'text', placeholder = '', hint, className = '' }) {
@@ -540,16 +544,18 @@ function triggerTypeLabelFromValuePath(valuePath) {
 }
 
 function ManageSection() {
-  const { address, isConnected } = useWallet(ADMIN_FAMILY)
-
   const [bondAddress, setBondAddress] = useState(localStorage.getItem('catbond_address') || '')
   const [triggerAddress, setTriggerAddress] = useState(localStorage.getItem('catbond_trigger') || '')
   const [reportLossB, setReportLossB] = useState('')
   const [reportNote, setReportNote] = useState('')
 
+  // The pasted bond address decides the chain (0x… = EVM, base58 = Solana),
+  // and with it which wallet acts.
   const bondRef = makeBondRef(bondAddress)
-  const validBond = !!bondRef && bondRef.family === ADMIN_FAMILY
-  const validTrigger = isValidAddress(triggerAddress, ADMIN_FAMILY)
+  const family = bondRef?.family ?? ADMIN_FAMILY
+  const { address, isConnected } = useWallet(family)
+  const validBond = !!bondRef
+  const validTrigger = isValidAddress(triggerAddress, family)
 
   // Bond reads — includes the bond's own trigger address so we always check the right contract.
   // threshold/lastCheck are new (§2.5) — the bond now owns its own threshold
@@ -569,7 +575,7 @@ function ManageSection() {
 
   // `latest` is undefined while the report log is empty, so check hasReports
   // before trusting it.
-  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(ADMIN_FAMILY, effectiveTriggerAddr)
+  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(family, effectiveTriggerAddr, bondRef?.network)
   const reportCount      = triggerData?.reportCount
   const latestValue      = triggerData?.latest?.value
   const latestReportedAt = triggerData?.latest?.reportedAt
@@ -612,14 +618,14 @@ function ManageSection() {
   function fundBudget() {
     if (!requiredCouponBudget) return
     const totalNeeded = (requiredCouponBudget * 10050n) / 10000n
-    if ((usdcAllowance ?? 0n) < totalNeeded) {
+    if (actions.requiresApproval && (usdcAllowance ?? 0n) < totalNeeded) {
       actions.approve(totalNeeded * 2n)
     } else {
       actions.fundCouponBudget()
     }
   }
 
-  const needsBudgetApprove = requiredCouponBudget && (usdcAllowance ?? 0n) < (requiredCouponBudget * 10050n) / 10000n
+  const needsBudgetApprove = actions.requiresApproval && requiredCouponBudget && (usdcAllowance ?? 0n) < (requiredCouponBudget * 10050n) / 10000n
 
   return (
     <div>
@@ -728,7 +734,8 @@ function ManageSection() {
             <p className="text-amber-600 text-xs pt-1">Connect wallet to take actions.</p>
           )}
           <div className="text-xs text-[var(--wkb-ink-muted)] pt-1">
-            USDC balance: {formatUSDC(usdcBalance)} · Allowance to bond: {formatUSDC(usdcAllowance)}
+            {family === FAMILY.SOLANA ? 'Your token balance' : 'USDC balance'}: {formatUSDC(usdcBalance)} ·{' '}
+            {actions.requiresApproval ? <>Allowance to bond: {formatUSDC(usdcAllowance)}</> : 'No approval needed (Solana)'}
           </div>
         </div>
       )}
@@ -748,7 +755,7 @@ function ManageSection() {
           description={`Sponsor deposits coupon budget to open subscription window. Required: ${formatUSDC(requiredCouponBudget)} + 0.5% fee. Your USDC balance: ${formatUSDC(usdcBalance)}.`}
           onClick={fundBudget}
           disabled={isBusy || !isConnected || statusNum !== 0}
-          label={needsBudgetApprove ? '① Approve USDC' : '② Fund Coupon Budget'}
+          label={needsBudgetApprove ? '① Approve USDC' : actions.requiresApproval ? '② Fund Coupon Budget' : 'Fund Coupon Budget'}
         />
 
         {/* Close Subscription */}
@@ -870,15 +877,15 @@ function formatDuration(seconds) {
 /** §3.2 dashboard-lite for the two canonical public triggers — the only
  *  triggers enumerable without a registry backend (deferred, see plan).
  *  Everything here is a plain on-chain read; no server involved. */
-function TriggerCard({ label, address }) {
+function TriggerCard({ label, address, family = ADMIN_FAMILY, network }) {
   const [expanded, setExpanded] = useState(false)
   const [testThreshold, setTestThreshold] = useState('')
-  const triggerActions = useTriggerActions(ADMIN_FAMILY)
+  const triggerActions = useTriggerActions(family, network)
   const { isWriting: isPending, isConfirming, isConfirmed, hash: txHash, error: writeError } = triggerActions.tx
   const [reportLossB, setReportLossB] = useState('')
   const [reportNote, setReportNote] = useState('')
 
-  const { trigger, refetch } = useTrigger(ADMIN_FAMILY, address)
+  const { trigger, refetch } = useTrigger(family, address, network)
   const {
     productId, version: productVersion, valuePath, units, maxReportAge,
     reportCount, reporter, owner,
@@ -887,7 +894,7 @@ function TriggerCard({ label, address }) {
   const latestReportedAt = trigger?.latest?.reportedAt
   const hasReports = reportCount !== undefined && Number(reportCount) > 0
 
-  const history = useTriggerHistory(ADMIN_FAMILY, address, reportCount, { limit: 10, enabled: expanded })
+  const history = useTriggerHistory(family, address, reportCount, { limit: 10, enabled: expanded }, network)
 
   const now = Math.floor(Date.now() / 1000)
   const secondsUntilStale = hasReports && maxReportAge !== undefined
@@ -1005,11 +1012,25 @@ function TriggerCard({ label, address }) {
   )
 }
 
+/** Canonical triggers for every network that has them (chains/registry.js). */
 function TriggerStatusSection() {
+  const networks = NETWORKS.filter(n => n.triggers?.economic || n.triggers?.industry)
   return (
-    <div className="space-y-4">
-      <TriggerCard label={TRIGGER_TYPES.economic.label} address={CANONICAL_TRIGGERS.economic} />
-      <TriggerCard label={TRIGGER_TYPES.industry.label} address={CANONICAL_TRIGGERS.industry} />
+    <div className="space-y-6">
+      {networks.map(n => (
+        <div key={n.id} className="space-y-4">
+          <div className="text-xs font-semibold text-[var(--wkb-ink-muted)] uppercase tracking-wide">{n.label}</div>
+          {['economic', 'industry'].filter(k => n.triggers[k]).map(k => (
+            <TriggerCard
+              key={k}
+              label={TRIGGER_TYPES[k].label}
+              address={n.triggers[k]}
+              family={n.family}
+              network={n.family === FAMILY.SOLANA ? n.id : undefined}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -1033,7 +1054,12 @@ export default function AdminPage() {
           </h1>
           {greeting && <p className="text-sm text-[var(--wkb-ink-muted)] mt-1">{greeting}</p>}
         </div>
-        {unlocked && <ConnectButton />}
+        {unlocked && (
+          <div className="flex flex-col items-end gap-2">
+            <ConnectButton family={FAMILY.EVM} label="EVM" />
+            <ConnectButton family={FAMILY.SOLANA} label="Solana" />
+          </div>
+        )}
       </header>
 
       {!unlocked ? (

@@ -13,14 +13,14 @@ import {
 } from './evm/adapter'
 import {
   isSolanaAddress, useSolanaWallet, useSolanaBond, useSolanaTrigger, useSolanaTriggerHistory,
-  useSolanaPosition, useSolanaActions, useSolanaTriggerActions, useSolanaCreate,
+  useSolanaPosition, useSolanaActions, useSolanaTriggerActions, useSolanaCreateBond, useSolanaCreateTrigger,
 } from './solana/adapter'
 import { defaultNetwork } from './registry'
 
 export { STATUS, FAMILY } from './types'
 export { NETWORKS, networkById, defaultNetwork } from './registry'
 
-/** Families the UI can load bonds on. Solana is read-only until Phase D. */
+/** Families the UI can load bonds on and transact with. */
 export const ENABLED_FAMILIES = [FAMILY.EVM, FAMILY.SOLANA]
 
 const ADDRESS_CHECKS = {
@@ -114,33 +114,40 @@ export function useBondPosition(ref, owner, mint) {
 
 export function useBondActions(ref, mint) {
   const evm = useEvmActions(on(ref, FAMILY.EVM), mint)
-  const solana = useSolanaActions()
+  const solana = useSolanaActions(on(ref, FAMILY.SOLANA))
   return pick(ref?.family, { evm, solana })
 }
 
-export function useTriggerActions(family = FAMILY.EVM) {
+export function useTriggerActions(family = FAMILY.EVM, network) {
   const evm = useEvmTriggerActions()
-  const solana = useSolanaTriggerActions()
+  const solana = useSolanaTriggerActions(network)
   return pick(family, { evm, solana })
 }
 
-/** `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's JSDoc. */
-export function useCreateTrigger(family = FAMILY.EVM) {
+/**
+ * `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's
+ * JSDoc. On Solana the connected wallet must be the owner (it signs).
+ */
+export function useCreateTrigger(family = FAMILY.EVM, network) {
   const evm = useEvmCreateTrigger()
-  const solana = useSolanaCreate()
+  const solana = useSolanaCreateTrigger(network)
   return pick(family, { evm, solana })
 }
 
-/** `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's JSDoc. */
-export function useCreateBond(family = FAMILY.EVM) {
+/**
+ * `{ create(params), tx, createdAddress }`. Params: see the EVM adapter's
+ * JSDoc. On Solana the connected wallet must be the sponsor (it signs).
+ */
+export function useCreateBond(family = FAMILY.EVM, network) {
   const evm = useEvmCreateBond()
-  const solana = useSolanaCreate()
+  const solana = useSolanaCreateBond(network)
   return pick(family, { evm, solana })
 }
 
 /**
  * Program/contract error name (e.g. 'NothingToClaim'). CatBond.sol and the
- * cat_bond program use the same names, so pages map them with one table.
+ * cat_bond program use the same names, and both adapters attach the name at
+ * `cause.data.errorName`, so pages map them with one table.
  */
 export function errorName(err) {
   return evmErrorName(err)

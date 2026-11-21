@@ -1,23 +1,23 @@
-// Solana adapter: reads the cat_bond program's accounts (via the
-// Codama-generated client in ./generated) and maps them onto the same
-// chain-neutral shapes the EVM adapter returns (../types.js).
+// Solana adapter: React hooks over ./core.js, mapped onto the same
+// chain-neutral shapes the EVM adapter uses (../types.js).
 //
-// Phase C = read-only. Writes are stubs that report a clear "not yet" error;
-// they're wired to the generated instruction builders in Phase D.
+// Reads use react-query against the network's RPC. Writes are signed by the
+// connected Solana wallet through core.js's send pipeline, which simulates
+// every transaction first, so program errors (e.g. BelowMinInvestment)
+// surface by name before the wallet ever prompts. All transaction logic
+// lives in core.js so it can be exercised from Node against a live
+// validator; this file only adds React state and the wallet.
 
-import { useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  address as toAddress, createSolanaRpc, fetchEncodedAccount, fetchEncodedAccounts,
-  getAddressEncoder, getProgramDerivedAddress, getU64Encoder, isAddress, unwrapOption,
-} from '@solana/kit'
-import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from '@solana-program/token'
+import { address as toAddress, createSolanaRpc, isAddress, unwrapOption } from '@solana/kit'
 import { useWallet as useAdapterWallet } from '@solana/wallet-adapter'
 import { useWalletModal } from '@solana/wallet-adapter/ui'
 import {
-  BOND_DISCRIMINATOR, CAT_BOND_PROGRAM_ADDRESS, POSITION_DISCRIMINATOR, REPORT_DISCRIMINATOR,
-  TRIGGER_DISCRIMINATOR, decodeBond, decodePosition, decodeReport, decodeTrigger, findPositionPda,
+  BOND_DISCRIMINATOR, POSITION_DISCRIMINATOR, REPORT_DISCRIMINATOR, TRIGGER_DISCRIMINATOR,
+  decodeBond, decodePosition, decodeReport, decodeTrigger, findPositionPda,
 } from './generated'
+import { ata, build, chainError, fetchAllTyped, fetchTyped, reportPda, sendInstructions } from './core'
 import { defaultNetwork, networkById } from '../registry'
 import { FAMILY } from '../types'
 
@@ -33,32 +33,9 @@ function rpcFor(networkId) {
   return { rpc: rpcCache.get(net.rpcUrl), net }
 }
 
-// ── Typed account fetch ──────────────────────────────────────────────────────
-// The generated decoders don't check the account's owner or Anchor
-// discriminator: decoding a Trigger as a Bond throws, and an unrelated
-// account of the right size could decode as garbage. So only decode an
-// account this program owns whose first 8 bytes are the expected type tag;
-// anything else is reported as "doesn't exist" (same as an empty address).
-
-function isTyped(encoded, discriminator) {
-  if (!encoded.exists || encoded.programAddress !== CAT_BOND_PROGRAM_ADDRESS) return false
-  const data = encoded.data
-  if (data.length < discriminator.length) return false
-  return discriminator.every((byte, i) => data[i] === byte)
-}
-
-async function fetchTyped(rpc, addr, discriminator, decode) {
-  const encoded = await fetchEncodedAccount(rpc, addr)
-  return isTyped(encoded, discriminator) ? { exists: true, data: decode(encoded).data } : { exists: false }
-}
-
-async function fetchAllTyped(rpc, addrs, discriminator, decode) {
-  const encoded = await fetchEncodedAccounts(rpc, addrs)
-  return encoded.map(e => (isTyped(e, discriminator) ? { exists: true, data: decode(e).data } : { exists: false }))
-}
-
 /** Network id a ref resolves to (its own, or the Solana default). */
 const netIdOf = (ref) => ref?.network ?? defaultNetwork(FAMILY.SOLANA)?.id ?? null
+const netIdOr = (networkId) => networkId ?? defaultNetwork(FAMILY.SOLANA)?.id ?? null
 
 // ── Wallet ───────────────────────────────────────────────────────────────────
 
@@ -83,7 +60,7 @@ export function useSolanaBond(ref) {
     enabled: !!ref?.address,
     queryFn: async () => {
       const { rpc } = rpcFor(netId)
-      const acct = await fetchTyped(rpc, toAddress(ref.address), BOND_DISCRIMINATOR, decodeBond)
+      const acct = await fetchTyped(rpc, ref.address, BOND_DISCRIMINATOR, decodeBond)
       if (!acct.exists) return { exists: false }
       const d = acct.data
       return {
@@ -124,13 +101,13 @@ export function useSolanaBond(ref) {
 }
 
 export function useSolanaTrigger(triggerAddress, networkId) {
-  const netId = networkId ?? defaultNetwork(FAMILY.SOLANA)?.id ?? null
+  const netId = netIdOr(networkId)
   const q = useQuery({
     queryKey: ['solana', 'trigger', netId, triggerAddress],
     enabled: !!triggerAddress && isAddress(triggerAddress),
     queryFn: async () => {
       const { rpc } = rpcFor(netId)
-      const acct = await fetchTyped(rpc, toAddress(triggerAddress), TRIGGER_DISCRIMINATOR, decodeTrigger)
+      const acct = await fetchTyped(rpc, triggerAddress, TRIGGER_DISCRIMINATOR, decodeTrigger)
       if (!acct.exists) return { exists: false }
       const d = acct.data
       const latest = unwrapOption(d.latest)               // Option<ReportData> → ReportData | null
@@ -151,23 +128,17 @@ export function useSolanaTrigger(triggerAddress, networkId) {
   return { trigger: q.data, refetch: q.refetch }
 }
 
-const reportPda = async (trigger, index) => (await getProgramDerivedAddress({
-  programAddress: CAT_BOND_PROGRAM_ADDRESS,
-  seeds: ['report', getAddressEncoder().encode(trigger), getU64Encoder().encode(index)],
-}))[0]
-
 /** Newest-first `{value, reportedAt}` list, read from the trigger's Report PDAs. */
 export function useSolanaTriggerHistory(triggerAddress, reportCount, { limit = 10, enabled = true } = {}, networkId) {
-  const netId = networkId ?? defaultNetwork(FAMILY.SOLANA)?.id ?? null
+  const netId = netIdOr(networkId)
   const count = Number(reportCount ?? 0)
   const q = useQuery({
     queryKey: ['solana', 'reports', netId, triggerAddress, count, limit],
     enabled: !!triggerAddress && enabled && count > 0,
     queryFn: async () => {
       const { rpc } = rpcFor(netId)
-      const trigger = toAddress(triggerAddress)
       const indexes = Array.from({ length: Math.min(count, limit) }, (_, i) => BigInt(count - 1 - i))
-      const pdas = await Promise.all(indexes.map(i => reportPda(trigger, i)))
+      const pdas = await Promise.all(indexes.map(i => reportPda(triggerAddress, i)))
       const accounts = await fetchAllTyped(rpc, pdas, REPORT_DISCRIMINATOR, decodeReport)
       return accounts.map(a => a.exists ? { value: a.data.data.value, reportedAt: a.data.data.reportedAt } : undefined)
     },
@@ -182,13 +153,11 @@ export function useSolanaPosition(ref, owner, mint) {
     enabled: !!ref?.address && !!owner && !!mint,
     queryFn: async () => {
       const { rpc } = rpcFor(netId)
-      const bond = toAddress(ref.address)
-      const investor = toAddress(owner)
-      const [positionAddr] = await findPositionPda({ bond, investor })
-      const [ata] = await findAssociatedTokenPda({ owner: investor, mint: toAddress(mint), tokenProgram: TOKEN_PROGRAM_ADDRESS })
+      const [positionAddr] = await findPositionPda({ bond: toAddress(ref.address), investor: toAddress(owner) })
+      const tokenAccount = await ata(owner, mint)
       const [position, balance] = await Promise.all([
         fetchTyped(rpc, positionAddr, POSITION_DISCRIMINATOR, decodePosition),
-        rpc.getTokenAccountBalance(ata).send().then(r => BigInt(r.value.amount)).catch(() => 0n),  // no ATA yet → 0
+        rpc.getTokenAccountBalance(tokenAccount).send().then(r => BigInt(r.value.amount)).catch(() => 0n),  // no ATA yet → 0
       ])
       // No Position account = never deposited, same as principalOf() == 0 on EVM.
       const p = position.exists ? position.data : { principal: 0n, claimed: 0n, withdrawn: false }
@@ -204,41 +173,102 @@ export function useSolanaPosition(ref, owner, mint) {
   return { position: q.data, refetch: q.refetch }
 }
 
-// ── Writes (Phase D) ─────────────────────────────────────────────────────────
+// ── Writes ───────────────────────────────────────────────────────────────────
 
-const NOT_YET = 'Solana transactions arrive in Phase D. This bond is read-only in the UI for now.'
+const IDLE = { isWriting: false, isConfirming: false, isConfirmed: false, hash: undefined, error: null }
 
-function useNotYetSlot() {
-  const [error, setError] = useState(null)
-  const fail = () => {
-    const err = new Error(NOT_YET)
-    err.shortMessage = NOT_YET
-    setError(err)
-  }
-  const tx = useMemo(
-    () => ({ isWriting: false, isConfirming: false, isConfirmed: false, hash: undefined, error }),
-    [error],
-  )
-  return { tx, fail }
+/**
+ * One write slot, mirroring the EVM adapter's: the latest call drives one tx
+ * banner. `run(netId, buildFn)` builds instructions with the wallet's signer
+ * and sends them via core.sendInstructions. Resolves to the signature, or
+ * undefined on error (the error lands in `tx.error`).
+ */
+function useSolanaWriteSlot() {
+  const { signer } = useAdapterWallet()
+  const [tx, setTx] = useState(IDLE)
+
+  const run = useCallback(async (netId, buildFn) => {
+    setTx({ ...IDLE, isWriting: true })
+    try {
+      if (!signer) throw chainError('Connect a Solana wallet first.')
+      const { rpc } = rpcFor(netId)
+      const instructions = await buildFn(signer, rpc)
+      const signature = await sendInstructions(rpc, signer, instructions, {
+        onSent: (sig) => setTx({ ...IDLE, isConfirming: true, hash: sig }),
+      })
+      setTx({ ...IDLE, isConfirmed: true, hash: signature })
+      return signature
+    } catch (e) {
+      const err = e?.cause?.data ? e : chainError(e?.shortMessage || e?.message || String(e))
+      setTx({ ...IDLE, error: err })
+      return undefined
+    }
+  }, [signer])
+
+  return { run, tx }
 }
 
-export function useSolanaActions() {
-  const { tx, fail } = useNotYetSlot()
+/** Bond actions (same surface as the EVM adapter's useEvmActions). */
+export function useSolanaActions(ref) {
+  const { run, tx } = useSolanaWriteSlot()
+  const netId = netIdOf(ref)
+  const bond = ref?.address
+  const act = (fn, ...args) => run(netId, (signer, rpc) => build[fn](signer, rpc, bond, ...args))
+
   return {
     tx,
+    /** SPL tokens move with the signer's own signature: there's no approve step. */
     requiresApproval: false,
-    approve: fail, fundCouponBudget: fail, deposit: fail, closeSubscription: fail,
-    claimCoupon: fail, withdrawPrincipal: fail, checkTrigger: fail, markMatured: fail,
-    settle: fail, postReport: fail,
+    approve: () => undefined,
+    fundCouponBudget:  () => act('fundCouponBudget'),
+    deposit:           (amount, maxAccepted) => act('deposit', amount, maxAccepted),
+    closeSubscription: () => act('closeSubscription'),
+    claimCoupon:       () => act('claimCoupon'),
+    withdrawPrincipal: () => act('withdrawPrincipal'),
+    checkTrigger:      () => act('checkTrigger'),
+    markMatured:       () => act('markMatured'),
+    settle:            () => act('settle'),
+    postReport: (triggerAddress, value, note) =>
+      run(netId, (signer, rpc) => build.postReport(signer, rpc, triggerAddress, value, note)),
   }
 }
 
-export function useSolanaTriggerActions() {
-  const { tx, fail } = useNotYetSlot()
-  return { tx, postReport: fail }
+/** Trigger-only actions, for screens with no bond in context. */
+export function useSolanaTriggerActions(networkId) {
+  const { run, tx } = useSolanaWriteSlot()
+  const netId = netIdOr(networkId)
+  return {
+    tx,
+    postReport: (triggerAddress, value, note) =>
+      run(netId, (signer, rpc) => build.postReport(signer, rpc, triggerAddress, value, note)),
+  }
 }
 
-export function useSolanaCreate() {
-  const { tx, fail } = useNotYetSlot()
-  return { tx, createdAddress: undefined, create: fail }
+// ── Creation ─────────────────────────────────────────────────────────────────
+// Solana bonds and triggers are PDAs: creating one is an instruction signed
+// by the connected wallet, which becomes the sponsor (bonds) or owner
+// (triggers). `createdAddress` is the new PDA once confirmed.
+
+function useSolanaCreate(networkId, builderName) {
+  const { run, tx } = useSolanaWriteSlot()
+  const [createdAddress, setCreatedAddress] = useState(undefined)
+  const netId = netIdOr(networkId)
+
+  const create = async (params) => {
+    setCreatedAddress(undefined)
+    let address
+    const signature = await run(netId, async (signer) => {
+      const built = await build[builderName](signer, params)
+      address = built.address
+      return built.instructions
+    })
+    if (signature) setCreatedAddress(address)
+  }
+  return { tx, createdAddress, create }
 }
+
+/** Same params as the EVM useEvmCreateBond; the connected wallet is the sponsor. */
+export const useSolanaCreateBond = (networkId) => useSolanaCreate(networkId, 'createBond')
+
+/** Same params as the EVM useEvmCreateTrigger; the connected wallet is the owner. */
+export const useSolanaCreateTrigger = (networkId) => useSolanaCreate(networkId, 'createTrigger')

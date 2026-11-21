@@ -343,28 +343,35 @@ contract CatBond is ReentrancyGuard {
     }
 
     /// @notice Investor claims any coupon that has vested since their last claim.
-    ///         Valid in Active (vesting up to maturity) and Triggered (vesting up to settlementTime).
+    ///         Valid in Active and Matured (vesting up to maturity) and Triggered
+    ///         (vesting up to settlementTime). Matured is allowed so coupon still
+    ///         unclaimed when the company calls markMatured() is never stranded;
+    ///         withdrawPrincipal() also sweeps it.
     function claimCoupon() external nonReentrant {
-        if (status != Status.Active && status != Status.Triggered) {
+        if (status != Status.Active && status != Status.Matured && status != Status.Triggered) {
             revert WrongStatus(Status.Active, status);
         }
+        if (principalOf[msg.sender] == 0) revert NotInvestor();
 
-        uint256 principal = principalOf[msg.sender];
-        if (principal == 0) revert NotInvestor();
+        uint256 claimable = _takeClaimable(msg.sender);
+        if (claimable == 0) revert NothingToClaim();
 
+        usdc.safeTransfer(msg.sender, claimable);
+        emit CouponClaimed(msg.sender, claimable);
+    }
+
+    /// @dev Coupon vested to `investor` but not yet claimed, marked as claimed.
+    ///      Caller transfers it. Vesting runs to maturity, or to settlementTime
+    ///      once triggered.
+    function _takeClaimable(address investor) internal returns (uint256 claimable) {
         uint256 vestingEnd = (status == Status.Triggered) ? settlementTime : maturity;
         uint256 elapsed    = _min(_now(), vestingEnd) - activeStart;
 
-        uint256 totalCoupon = principal * couponRateBps / BPS_DENOMINATOR;
+        uint256 totalCoupon = principalOf[investor] * couponRateBps / BPS_DENOMINATOR;
         uint256 vested      = totalCoupon * elapsed / termDuration;
-        uint256 claimable   = vested - alreadyClaimed[msg.sender];
+        claimable           = vested - alreadyClaimed[investor];
 
-        if (claimable == 0) revert NothingToClaim();
-
-        alreadyClaimed[msg.sender] += claimable;
-        usdc.safeTransfer(msg.sender, claimable);
-
-        emit CouponClaimed(msg.sender, claimable);
+        alreadyClaimed[investor] += claimable;
     }
 
     /// @notice Company wallet advances the bond to Matured after the term ends.
@@ -389,7 +396,8 @@ contract CatBond is ReentrancyGuard {
         emit BondMatured(_now());
     }
 
-    /// @notice Investor withdraws their full principal. Only valid after markMatured().
+    /// @notice Investor withdraws their full principal plus any coupon not yet
+    ///         claimed, in one transfer. Only valid after markMatured().
     function withdrawPrincipal()
         external
         inStatus(Status.Matured)
@@ -400,8 +408,10 @@ contract CatBond is ReentrancyGuard {
         if (principalWithdrawn[msg.sender])     revert AlreadyWithdrawn();
 
         principalWithdrawn[msg.sender] = true;
-        usdc.safeTransfer(msg.sender, principal);
+        uint256 coupon = _takeClaimable(msg.sender);
+        usdc.safeTransfer(msg.sender, principal + coupon);
 
+        if (coupon > 0) emit CouponClaimed(msg.sender, coupon);
         emit PrincipalWithdrawn(msg.sender, principal);
     }
 

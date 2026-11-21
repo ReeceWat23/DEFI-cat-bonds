@@ -374,8 +374,10 @@ function DepositFlow({ actions, depositAmount, depositTotal, tokenAllowance, tok
       validationError = `Exceeds remaining capacity — max ${formatUSDC(coverageAmount - totalDeposited)}`
   }
 
-  const needsApprove    = flow === 'idle' || flow === 'approving'
-  const approveConfirmed = flow === 'ready' || flow === 'depositing'
+  // EVM needs an ERC-20 approve first; SPL transfers are signed directly.
+  const approvalStep     = actions.requiresApproval
+  const needsApprove     = approvalStep && (flow === 'idle' || flow === 'approving')
+  const approveConfirmed = approvalStep && (flow === 'ready' || flow === 'depositing')
 
   if (depositAmount === 0n) return null
 
@@ -389,15 +391,17 @@ function DepositFlow({ actions, depositAmount, depositTotal, tokenAllowance, tok
       )}
       {!validationError && (
         <>
-          <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)]">
-            <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
-              {approveConfirmed ? '✓' : '①'} Approve
-            </span>
-            <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
-            <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
-              ② Deposit
-            </span>
-          </div>
+          {approvalStep && (
+            <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)]">
+              <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
+                {approveConfirmed ? '✓' : '①'} Approve
+              </span>
+              <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
+              <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
+                ② Deposit
+              </span>
+            </div>
+          )}
           <div className="flex gap-3 items-center flex-wrap">
             {needsApprove && (
               <ActionButton
@@ -415,7 +419,7 @@ function DepositFlow({ actions, depositAmount, depositTotal, tokenAllowance, tok
               onClick={() => { setFlow('depositing'); actions.deposit(depositAmount, depositAmount) }}
               disabled={isBusy || needsApprove}
             >
-              {flow === 'depositing' && isBusy ? 'Depositing…' : '② Deposit'}
+              {flow === 'depositing' && isBusy ? 'Depositing…' : approvalStep ? '② Deposit' : 'Deposit'}
             </ActionButton>
           </div>
           {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)]">Approve first, then Deposit will unlock.</p>}
@@ -441,20 +445,23 @@ function FundFlow({ actions, budgetWithFee, tokenAllowance, isBusy, isConfirmed 
     if (flow === 'funding')   setFlow('idle')
   }, [isConfirmed])
 
-  const needsApprove    = flow === 'idle' || flow === 'approving'
-  const approveConfirmed = flow === 'ready' || flow === 'funding'
+  const approvalStep     = actions.requiresApproval
+  const needsApprove     = approvalStep && (flow === 'idle' || flow === 'approving')
+  const approveConfirmed = approvalStep && (flow === 'ready' || flow === 'funding')
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)] mb-3">
-        <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
-          {approveConfirmed ? '✓' : '①'} Approve token
-        </span>
-        <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
-        <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
-          ② Fund Coupon Budget
-        </span>
-      </div>
+      {approvalStep && (
+        <div className="flex items-center gap-2 text-xs text-[var(--rhodex-text-dark-muted)] mb-3">
+          <span className={`font-medium ${approveConfirmed ? 'text-green-600' : 'text-[var(--rhodex-accent)]'}`}>
+            {approveConfirmed ? '✓' : '①'} Approve token
+          </span>
+          <span className="text-[var(--rhodex-text-dark-muted)]">→</span>
+          <span className={`font-medium ${approveConfirmed ? 'text-[var(--rhodex-accent)]' : 'text-[var(--rhodex-text-dark-muted)]'}`}>
+            ② Fund Coupon Budget
+          </span>
+        </div>
+      )}
       <div className="flex items-center gap-3 flex-wrap">
         {needsApprove && (
           <ActionButton
@@ -472,7 +479,7 @@ function FundFlow({ actions, budgetWithFee, tokenAllowance, isBusy, isConfirmed 
           onClick={() => { setFlow('funding'); actions.fundCouponBudget() }}
           disabled={isBusy || needsApprove}
         >
-          {flow === 'funding' && isBusy ? 'Funding…' : '② Fund Coupon Budget'}
+          {flow === 'funding' && isBusy ? 'Funding…' : approvalStep ? '② Fund Coupon Budget' : 'Fund Coupon Budget'}
         </ActionButton>
       </div>
       {needsApprove && <p className="text-xs text-[var(--rhodex-text-dark-muted)] mt-2">Approve first so the bond contract can pull the coupon budget.</p>}
@@ -945,7 +952,10 @@ export default function DealPage() {
                     </ActionButton>
                   )}
 
-                  {/* Withdraw principal — Matured */}
+                  {/* Matured — withdraw pays principal plus any unclaimed
+                      coupon in one transaction. Claiming coupon on its own
+                      stays available until then; after withdraw there is
+                      nothing left to claim. */}
                   {statusNum === 3 && (
                     <>
                       <ActionButton
@@ -955,11 +965,13 @@ export default function DealPage() {
                         disabled={isBusy || !!principalWithdrawn}
                         className="mb-2"
                       >
-                        {principalWithdrawn ? 'Principal Withdrawn ✓' : 'Withdraw Principal'}
+                        {principalWithdrawn ? 'Principal + Coupon Withdrawn ✓' : 'Withdraw Principal + Coupon'}
                       </ActionButton>
-                      <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => actions.claimCoupon()} disabled={isBusy}>
-                        Claim Remaining Coupon
-                      </ActionButton>
+                      {!principalWithdrawn && (
+                        <ActionButton tone="success" size="w-full py-2.5 text-sm" onClick={() => actions.claimCoupon()} disabled={isBusy}>
+                          Claim Remaining Coupon Only
+                        </ActionButton>
+                      )}
                     </>
                   )}
                 </Surface>

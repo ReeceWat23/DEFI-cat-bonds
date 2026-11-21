@@ -52,8 +52,10 @@ for (const out of outputs) {
 // `process.env["NODE_ENV"] !== "production"` checks (to keep readable error
 // messages out of production). Browsers have no `process`, and Vite only
 // replaces `import.meta.env.*`, so the UI crashed on import with
-// "process is not defined". `import.meta.env.DEV` keeps the same intent:
-// true under `vite dev`, statically false in production builds.
+// "process is not defined". `import.meta.env?.DEV` keeps the same intent:
+// true under `vite dev`, false in production builds. The `?.` lets the same
+// file also load under Node (scripts/e2e-ui-core.ts imports the UI's core),
+// where import.meta.env is undefined and messages are simply omitted.
 // The scripts copy runs under Node, where `process` exists, so it's left alone.
 const uiOut = outputs[1]
 const NODE_ENV_CHECK = /process\.env\[["']NODE_ENV["']\]\s*!==\s*["']production["']/g
@@ -62,7 +64,7 @@ for (const file of fs.readdirSync(uiOut, { recursive: true })) {
   if (!String(file).endsWith('.ts')) continue
   const full = path.join(uiOut, String(file))
   const src = fs.readFileSync(full, 'utf8')
-  const next = src.replace(NODE_ENV_CHECK, () => { patched++; return 'import.meta.env.DEV' })
+  const next = src.replace(NODE_ENV_CHECK, () => { patched++; return 'import.meta.env?.DEV' })
   if (next !== src) fs.writeFileSync(full, next)
 }
 const leftover = fs.readdirSync(uiOut, { recursive: true })
@@ -72,4 +74,4 @@ if (leftover.length) {
   console.error(`✗ UI client still references \`process\` in: ${leftover.join(', ')}. It will crash in the browser.`)
   process.exit(1)
 }
-console.log(`✓ UI client made browser-safe (${patched} NODE_ENV check${patched === 1 ? '' : 's'} → import.meta.env.DEV)`)
+console.log(`✓ UI client made browser-safe (${patched} NODE_ENV check${patched === 1 ? '' : 's'} → import.meta.env?.DEV)`)

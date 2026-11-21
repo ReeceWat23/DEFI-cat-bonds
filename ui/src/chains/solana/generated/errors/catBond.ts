@@ -88,7 +88,7 @@ export type CatBondError =
   | typeof CAT_BOND_ERROR__ZERO_ADDRESS;
 
 let catBondErrorMessages: Record<CatBondError, string> | undefined;
-if (import.meta.env.DEV) {
+if (import.meta.env?.DEV) {
   catBondErrorMessages = {
     [CAT_BOND_ERROR__ALREADY_WITHDRAWN]: `Principal already withdrawn`,
     [CAT_BOND_ERROR__BELOW_MIN_INVESTMENT]: `Accepted amount is below the minimum investment`,
@@ -117,7 +117,7 @@ if (import.meta.env.DEV) {
 }
 
 export function getCatBondErrorMessage(code: CatBondError): string {
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV) {
     return (catBondErrorMessages as Record<CatBondError, string>)[code];
   }
 

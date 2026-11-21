@@ -65,6 +65,32 @@ avm install 1.2.2 && avm use 1.2.2
 anchor build && anchor keys sync && anchor build                  # real program ID
 ```
 
+## Tests
+
+```bash
+cd DEAL001
+anchor build                    # tests load target/deploy/cat_bond.so
+cargo test                      # 32 tests, < 1 s
+npx tsx scripts/e2e-ui-core.ts  # with `npm run localnet` up: the UI's own Solana tx code, end to end
+```
+
+- **`cargo test`** runs the math unit tests plus LiteSVM integration tests (`programs/cat_bond/tests/`) against the real SBF build:
+  - **`lifecycle.rs`:** maturity, trigger-fired, exact-threshold, undersubscription refund, repeat deposits and the verification stamp, with every token movement checked to the base unit.
+  - **`rejections.rs`:** every guard, each asserted against its exact error code: wrong signers, out-of-order steps, minimum/partial fills, missing/pre-commencement/below-threshold/stale reports, and redirected payouts or a fake vault.
+- **`e2e-ui-core.ts`** imports `ui/src/chains/solana/core.js` (the builders and send pipeline the pages use) and runs two real deals on the local validator, including error-name decoding from simulation.
+- **Toolchain:** LiteSVM 0.18 needs Rust ≥ 1.97.1, so `rust-toolchain.toml` pins Rust 1.100.0 *for this folder only*. rustup installs it on first use, and your global default is untouched.
+
+### Coupon after maturity (fixed on both chains, 2026-11-21)
+
+Coupon unclaimed when the company calls `markMatured()` / `mark_matured` used to be stranded on EVM: `claimCoupon()` rejected Matured and `withdrawPrincipal()` paid principal only. Now, on both chains:
+
+- **`withdraw_principal` / `withdrawPrincipal()`** pays principal **plus** any unclaimed coupon in one transfer (one click on the Deal page).
+- **`claim_coupon` / `claimCoupon()`** also works in Matured, for investors who want the coupon on its own first. Vesting still stops at maturity, so a late claim never pays more than the full coupon.
+
+Regression tests: `test_ClaimCoupon_AfterMarkMatured`, `test_WithdrawPrincipal_PaysUnclaimedCoupon`, `test_WithdrawPrincipal_PaysRemainingCoupon` (Foundry; all fail on the old contract) and `withdraw_sweeps_remaining_coupon_with_principal` + the happy path (LiteSVM). Bonds already deployed from the old `CatBond.sol` keep the old behaviour.
+
+Also note, in both versions: after a trigger, the unvested part of the coupon budget has no exit path and stays in the vault (asserted in `trigger_fired_pays_sponsor_and_stops_coupon_at_settlement`).
+
 ## Local environment (Solana counterpart of DEAL 000's `run.sh`)
 
 ```bash
@@ -85,9 +111,11 @@ The generated client is written to both `clients/js/generated/` (scripts) and `u
 ## TODO
 
 - [x] Install the toolchain, `anchor build`, `anchor keys sync` → program ID `3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj`
-- [ ] Port the Foundry suite (`DEAL 000/test/CatBond.t.sol`, ~70 tests) to LiteSVM integration tests
+- [x] LiteSVM integration tests (lifecycle + rejections, 24 tests; not a 1:1 port of the ~70 Foundry tests)
 - [x] Local deal setup script (equivalent of `DEAL 000/script/Setup.s.sol` + `run.sh`): `npm run localnet`
-- [ ] UI: swap wagmi deploy/calls for a Solana wallet adapter + generated client in `ui/`
+- [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
+- [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
+- [ ] Decide what happens to unvested coupon after a trigger (refund to sponsor?)
 
 ## Future ideas
 

@@ -35,22 +35,32 @@ pub struct InvestorPayout<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// Claim coupon vested since the last claim. Valid while Active (vesting to
-/// maturity) and after Triggered (vesting stops at settlement_time).
+/// Coupon vested to this position but not yet claimed. Vesting runs to
+/// maturity (Active, Matured) or stops at settlement_time (Triggered).
+fn unclaimed_coupon(bond: &Bond, position: &Position, now: i64) -> Result<u64> {
+    let vesting_end = if bond.status == Status::Triggered { bond.settlement_time } else { bond.maturity };
+    let elapsed = now.min(vesting_end) - bond.active_start;
+    let vested = math::vested_coupon(position.principal, bond.coupon_rate_bps, elapsed, bond.term_duration)?;
+    Ok(vested.saturating_sub(position.claimed))
+}
+
+/// Claim coupon vested since the last claim. Valid while Active and after
+/// Matured (vesting runs to maturity), and after Triggered (vesting stops at
+/// settlement_time).
+///
+/// Matured is allowed so coupon still unclaimed at mark_matured() is never
+/// stranded; withdraw_principal() also sweeps it. CatBond.sol had the same
+/// stranding bug and has the same fix.
 pub fn claim_coupon(ctx: Context<InvestorPayout>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let a = &ctx.accounts;
-    let bond = &a.bond;
     require!(
-        bond.status == Status::Active || bond.status == Status::Triggered,
+        matches!(a.bond.status, Status::Active | Status::Matured | Status::Triggered),
         CatBondError::WrongStatus
     );
     require!(a.position.principal > 0, CatBondError::NotInvestor);
 
-    let vesting_end = if bond.status == Status::Triggered { bond.settlement_time } else { bond.maturity };
-    let elapsed = now.min(vesting_end) - bond.active_start;
-    let vested = math::vested_coupon(a.position.principal, bond.coupon_rate_bps, elapsed, bond.term_duration)?;
-    let claimable = vested.saturating_sub(a.position.claimed);
+    let claimable = unclaimed_coupon(&a.bond, &a.position, now)?;
     require!(claimable > 0, CatBondError::NothingToClaim);
 
     // Effects before interaction.
@@ -64,18 +74,29 @@ pub fn claim_coupon(ctx: Context<InvestorPayout>) -> Result<()> {
     Ok(())
 }
 
-/// Withdraw full principal. Only after mark_matured().
+/// Withdraw full principal plus any coupon not yet claimed, in one transfer.
+/// Only after mark_matured().
 pub fn withdraw_principal(ctx: Context<InvestorPayout>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
     require_status(&ctx.accounts.bond, Status::Matured)?;
     let principal = ctx.accounts.position.principal;
     require!(principal > 0, CatBondError::NotInvestor);
     require!(!ctx.accounts.position.withdrawn, CatBondError::AlreadyWithdrawn);
 
-    ctx.accounts.position.withdrawn = true;
+    let coupon = unclaimed_coupon(&ctx.accounts.bond, &ctx.accounts.position, now)?;
+
+    // Effects before interaction.
+    let position = &mut ctx.accounts.position;
+    position.withdrawn = true;
+    position.claimed = position.claimed.checked_add(coupon).ok_or(CatBondError::MathOverflow)?;
+    let total = principal.checked_add(coupon).ok_or(CatBondError::MathOverflow)?;
 
     let a = &ctx.accounts;
-    transfer_from_vault(&a.token_program, &a.bond, &a.vault, &a.investor_token, &a.mint, principal)?;
+    transfer_from_vault(&a.token_program, &a.bond, &a.vault, &a.investor_token, &a.mint, total)?;
 
+    if coupon > 0 {
+        emit!(CouponClaimed { bond: a.bond.key(), investor: a.investor.key(), amount: coupon });
+    }
     emit!(PrincipalWithdrawn { bond: a.bond.key(), investor: a.investor.key(), amount: principal });
     Ok(())
 }
