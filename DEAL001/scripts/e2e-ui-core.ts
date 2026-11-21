@@ -5,7 +5,8 @@
 //
 //   A: create trigger + bond → fund → deposit → close → report → claim →
 //      mature → withdraw (sweeps the rest of the coupon)   (balances checked to the base unit)
-//   B: create bond → fund → deposit → close → qualifying report → settle
+//   B: create bond → fund → deposit → close → qualifying report → settle →
+//      claim full coupon
 //
 // Plus error decoding: failing calls must surface the program's error name
 // from simulation (what the pages map to friendly messages).
@@ -156,6 +157,10 @@ await act(company, 'settle', bondB)
 eq('settle → status', Number((await bondState(bondB)).status), gen.Status.Triggered)
 eq('sponsor received all principal', await balance(sponsor.address) - spB, 100_000n * USDC)
 await expectError('withdraw after trigger', 'WrongStatus', () => act(investor, 'withdrawPrincipal', bondB))
+const invB = await balance(investor.address)
+await act(investor, 'claimCoupon', bondB)                 // full coupon after a trigger
+eq('full 8% coupon claimable after trigger', await balance(investor.address) - invB, 8_000n * USDC)
+eq('vault emptied after trigger', BigInt((await rpc.getTokenAccountBalance((await bondState(bondB)).vault).send()).value.amount), 0n)
 
 console.log(failures ? `\n  ${failures} check(s) FAILED\n` : '\n  All checks passed.\n')
 process.exit(failures ? 1 : 0)

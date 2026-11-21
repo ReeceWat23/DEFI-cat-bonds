@@ -93,7 +93,7 @@ pub struct Settle<'info> {
 }
 
 /// Trigger fired: all principal goes to the sponsor. The coupon budget stays
-/// in the vault so investors can still claim coupon vested up to now.
+/// in the vault, and investors can then claim their full coupon.
 pub fn settle(ctx: Context<Settle>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require_status(&ctx.accounts.bond, Status::Active)?;

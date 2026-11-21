@@ -344,7 +344,7 @@ contract CatBond is ReentrancyGuard {
 
     /// @notice Investor claims any coupon that has vested since their last claim.
     ///         Valid in Active and Matured (vesting up to maturity) and Triggered
-    ///         (vesting up to settlementTime). Matured is allowed so coupon still
+    ///         (the full coupon, at once). Matured is allowed so coupon still
     ///         unclaimed when the company calls markMatured() is never stranded;
     ///         withdrawPrincipal() also sweeps it.
     function claimCoupon() external nonReentrant {
@@ -361,15 +361,19 @@ contract CatBond is ReentrancyGuard {
     }
 
     /// @dev Coupon vested to `investor` but not yet claimed, marked as claimed.
-    ///      Caller transfers it. Vesting runs to maturity, or to settlementTime
-    ///      once triggered.
+    ///      Caller transfers it. Vesting is linear to maturity; once triggered
+    ///      the whole coupon is vested: the investor has lost their principal,
+    ///      and the sponsor prepaid the full-term coupon for the cover.
     function _takeClaimable(address investor) internal returns (uint256 claimable) {
-        uint256 vestingEnd = (status == Status.Triggered) ? settlementTime : maturity;
-        uint256 elapsed    = _min(_now(), vestingEnd) - activeStart;
-
         uint256 totalCoupon = principalOf[investor] * couponRateBps / BPS_DENOMINATOR;
-        uint256 vested      = totalCoupon * elapsed / termDuration;
-        claimable           = vested - alreadyClaimed[investor];
+        uint256 vested;
+        if (status == Status.Triggered) {
+            vested = totalCoupon;
+        } else {
+            uint256 elapsed = _min(_now(), maturity) - activeStart;
+            vested          = totalCoupon * elapsed / termDuration;
+        }
+        claimable = vested - alreadyClaimed[investor];
 
         alreadyClaimed[investor] += claimable;
     }
@@ -416,7 +420,7 @@ contract CatBond is ReentrancyGuard {
     }
 
     /// @notice Company wallet confirms trigger has fired and transfers all principal to sponsor.
-    ///         Coupon budget remains so investors can still claim vested coupon up to settlementTime.
+    ///         The coupon budget stays, and investors can then claim their full coupon.
     function settle()
         external
         onlyCompanyWallet

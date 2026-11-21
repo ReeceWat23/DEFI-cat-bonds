@@ -862,7 +862,7 @@ export default function DealPage() {
                 {statusNum === 4 && (
                   <div className="flex items-center gap-3 text-red-700 text-sm">
                     <span className="text-xl">🔴</span>
-                    <span>Trigger fired. Principal transferred to sponsor at settlement.</span>
+                    <span>Trigger fired. Principal transferred to sponsor at settlement; investors can claim their full coupon.</span>
                   </div>
                 )}
               </Surface>

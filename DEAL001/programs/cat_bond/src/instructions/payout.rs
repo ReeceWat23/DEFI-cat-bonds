@@ -35,18 +35,22 @@ pub struct InvestorPayout<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// Coupon vested to this position but not yet claimed. Vesting runs to
-/// maturity (Active, Matured) or stops at settlement_time (Triggered).
+/// Coupon vested to this position but not yet claimed. Vesting is linear to
+/// maturity (Active, Matured); once Triggered the whole coupon is vested: the
+/// investor has lost their principal, and the sponsor prepaid the full-term
+/// coupon for the cover. Same as CatBond.sol.
 fn unclaimed_coupon(bond: &Bond, position: &Position, now: i64) -> Result<u64> {
-    let vesting_end = if bond.status == Status::Triggered { bond.settlement_time } else { bond.maturity };
-    let elapsed = now.min(vesting_end) - bond.active_start;
+    let elapsed = if bond.status == Status::Triggered {
+        bond.term_duration
+    } else {
+        now.min(bond.maturity) - bond.active_start
+    };
     let vested = math::vested_coupon(position.principal, bond.coupon_rate_bps, elapsed, bond.term_duration)?;
     Ok(vested.saturating_sub(position.claimed))
 }
 
 /// Claim coupon vested since the last claim. Valid while Active and after
-/// Matured (vesting runs to maturity), and after Triggered (vesting stops at
-/// settlement_time).
+/// Matured (vesting runs to maturity), and after Triggered (the full coupon).
 ///
 /// Matured is allowed so coupon still unclaimed at mark_matured() is never
 /// stranded; withdraw_principal() also sweeps it. CatBond.sol had the same

@@ -109,15 +109,22 @@ fn withdraw_sweeps_remaining_coupon_with_principal() {
 }
 
 /// Trigger fires one day into a three-day term: principal goes to the
-/// sponsor, investors keep coupon vested up to settlement and no more.
+/// sponsor, and investors can claim their full coupon at once.
 #[test]
-fn trigger_fired_pays_sponsor_and_stops_coupon_at_settlement() {
+fn trigger_fired_pays_sponsor_and_full_coupon_to_investors() {
     let mut d = Deal::new();
-    let (sponsor, company, inv0) = (d.sponsor.insecure_clone(), d.company.insecure_clone(), d.investors[0].insecure_clone());
-    d.activate(&[500_000 * USDC]);
+    let (sponsor, company) = (d.sponsor.insecure_clone(), d.company.insecure_clone());
+    let (inv0, inv1) = (d.investors[0].insecure_clone(), d.investors[1].insecure_clone());
+    d.activate(&[300_000 * USDC, 200_000 * USDC]);
     let sponsor_before = d.balance(&sponsor.pubkey());
 
-    d.warp(DAY);
+    // inv0 claims a sixth of the term (half a day) before the trigger.
+    ok(d.post_report(&company, usd_b(100)));
+    d.warp(DAY / 2);
+    ok(d.claim(&inv0));
+    assert_eq!(d.position(&inv0.pubkey()).unwrap().claimed, 4_000 * USDC, "1/6 of 8% × $300k");
+
+    d.warp(DAY / 2);
     ok(d.post_report(&company, usd_b(400))); // ≥ $370B
     ok(d.settle(&company));
 
@@ -127,19 +134,19 @@ fn trigger_fired_pays_sponsor_and_stops_coupon_at_settlement() {
     assert!(b.last_check.triggered);
     assert_eq!(d.balance(&sponsor.pubkey()), sponsor_before + 500_000 * USDC, "all principal to sponsor");
 
-    // One day of three vested: 40,000 × 1/3, floored to the base unit.
+    // Full coupon, though only a third of the term ran: inv0 gets the rest,
+    // inv1 gets all of it.
+    let (b0, b1) = (d.balance(&inv0.pubkey()), d.balance(&inv1.pubkey()));
     ok(d.claim(&inv0));
-    let vested = 40_000 * USDC / 3;
-    assert_eq!(d.position(&inv0.pubkey()).unwrap().claimed, vested);
+    ok(d.claim(&inv1));
+    assert_eq!(d.balance(&inv0.pubkey()) - b0, 20_000 * USDC);
+    assert_eq!(d.balance(&inv1.pubkey()) - b1, 16_000 * USDC);
 
-    // Vesting stopped at settlement.
-    d.warp(2 * DAY);
+    // Nothing more, no principal, and the vault is empty.
+    d.warp(3 * DAY);
     assert_fails_with(d.claim(&inv0), code(CatBondError::NothingToClaim));
     assert_fails_with(d.withdraw(&inv0), code(CatBondError::WrongStatus));
-
-    // Known gap (same as CatBond.sol): the unvested coupon budget has no
-    // exit path after a trigger; it stays in the vault.
-    assert_eq!(d.vault_balance(), 40_000 * USDC - vested);
+    assert_eq!(d.vault_balance(), 0, "nothing stranded after a trigger");
 }
 
 /// Exactly at the threshold counts as triggered (`>=`), matching CatBond.sol.

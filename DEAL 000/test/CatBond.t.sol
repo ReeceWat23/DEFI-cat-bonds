@@ -243,7 +243,7 @@ contract CatBondTest is Test {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2. TRIGGER PATH — trigger fires mid-term
-    // Protects: sponsor gets principal; investors only claim coupon up to settlementTime
+    // Protects: sponsor gets principal; investors can claim their full coupon at once
     // ─────────────────────────────────────────────────────────────────────────
     function test_TriggerPath() public {
         _sponsorFunds();
@@ -269,7 +269,7 @@ contract CatBondTest is Test {
         // Sponsor received all $75k principal
         assertEq(usdc.balanceOf(sponsor) - sponsorBefore, COVERAGE);
 
-        // Investor claims coupon — should be ~25% of full coupon
+        // Investor claims — the full coupon, though only 1/4 of the term ran
         uint256 inv1Before = usdc.balanceOf(investor1);
         vm.prank(investor1);
         bond.claimCoupon();
@@ -277,13 +277,44 @@ contract CatBondTest is Test {
 
         uint256 fullCoupon = 25_000 * 1e6 * COUPON_BPS * TERM_DURATION
                              / (10_000 * 365 days);
-        uint256 expectedCoupon = fullCoupon * quarterTerm / TERM_DURATION;
-        assertEq(couponReceived, expectedCoupon);
+        assertEq(couponReceived, fullCoupon);
 
-        // Investor cannot claim more after all vested coupon claimed
+        // Nothing more later, and principal is gone (it went to the sponsor)
+        vm.warp(bond.maturity() + 1);
         vm.prank(investor1);
         vm.expectRevert(CatBond.NothingToClaim.selector);
         bond.claimCoupon();
+        vm.prank(investor1);
+        vm.expectRevert(abi.encodeWithSelector(CatBond.WrongStatus.selector, CatBond.Status.Matured, CatBond.Status.Triggered));
+        bond.withdrawPrincipal();
+
+        // Once every investor has claimed, nothing is left in the contract
+        vm.prank(investor2);
+        bond.claimCoupon();
+        vm.prank(investor3);
+        bond.claimCoupon();
+        assertEq(usdc.balanceOf(address(bond)), 0);
+    }
+
+    /// @dev Investor who claimed part of the coupon before the trigger gets
+    ///      exactly the rest after it.
+    function test_TriggerPath_ClaimsRestAfterPartialClaim() public {
+        _sponsorFunds();
+        _investorDeposits(investor1, 25_000 * 1e6);
+        _closeSubscription();
+        vm.warp(bond.activeStart() + TERM_DURATION / 2);
+        vm.prank(investor1);
+        bond.claimCoupon();
+        uint256 half = usdc.balanceOf(investor1);
+
+        _report(1);
+        vm.prank(companyWallet);
+        bond.settle();
+
+        vm.prank(investor1);
+        bond.claimCoupon();
+        assertEq(usdc.balanceOf(investor1), _fullCoupon25k());
+        assertGt(usdc.balanceOf(investor1), half);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

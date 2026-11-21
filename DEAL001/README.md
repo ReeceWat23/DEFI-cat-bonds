@@ -89,7 +89,9 @@ Coupon unclaimed when the company calls `markMatured()` / `mark_matured` used to
 
 Regression tests: `test_ClaimCoupon_AfterMarkMatured`, `test_WithdrawPrincipal_PaysUnclaimedCoupon`, `test_WithdrawPrincipal_PaysRemainingCoupon` (Foundry; all fail on the old contract) and `withdraw_sweeps_remaining_coupon_with_principal` + the happy path (LiteSVM). Bonds already deployed from the old `CatBond.sol` keep the old behaviour.
 
-Also note, in both versions: after a trigger, the unvested part of the coupon budget has no exit path and stays in the vault (asserted in `trigger_fired_pays_sponsor_and_stops_coupon_at_settlement`).
+### Coupon after a trigger (both chains, 2026-11-21)
+
+When the trigger fires, principal goes to the sponsor, and each investor can claim their **full** coupon at once, not just the part vested up to settlement. The sponsor prepaid the full-term coupon for the cover, and before this the unvested part had no exit and sat in the vault forever. Now the vault empties after a trigger too. Tests: `test_TriggerPath`, `test_TriggerPath_ClaimsRestAfterPartialClaim` (Foundry), `trigger_fired_pays_sponsor_and_full_coupon_to_investors` (LiteSVM), Deal B in `e2e-ui-core.ts`.
 
 ## Local environment (Solana counterpart of DEAL 000's `run.sh`)
 
@@ -115,7 +117,7 @@ The generated client is written to both `clients/js/generated/` (scripts) and `u
 - [x] Local deal setup script (equivalent of `DEAL 000/script/Setup.s.sol` + `run.sh`): `npm run localnet`
 - [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
 - [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
-- [ ] Decide what happens to unvested coupon after a trigger (refund to sponsor?)
+- [x] Coupon after a trigger: investors claim the full coupon, both chains
 
 ## Future ideas
 
