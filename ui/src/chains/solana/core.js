@@ -151,7 +151,7 @@ export async function loadBond(rpc, bondAddress) {
   return acct.data
 }
 
-async function loadTrigger(rpc, triggerAddress) {
+export async function loadTrigger(rpc, triggerAddress) {
   const acct = await fetchTyped(rpc, triggerAddress, TRIGGER_DISCRIMINATOR, decodeTrigger)
   if (!acct.exists) throw chainError('No cat_bond trigger at this address on this network.')
   return acct.data
@@ -232,12 +232,19 @@ export const build = {
     ]
   },
 
-  /** `note` is hashed into monitorRef (sha256; the EVM UI uses keccak256). */
+  /**
+   * `note` is a free-text note hashed into monitorRef (sha256; the EVM UI
+   * uses keccak256), or an exact 32-byte monitorRef (a Uint8Array), e.g. the
+   * monitor entry's raw_response_hash posted by api/report_trigger.py.
+   */
   async postReport(signer, rpc, triggerAddress, value, note = '') {
     const t = await loadTrigger(rpc, triggerAddress)
+    const monitorRef = note instanceof Uint8Array
+      ? (note.length === 32 ? note : (() => { throw new Error('monitorRef must be 32 bytes') })())
+      : await sha256(String(note).trim() || 'manual-admin-report')
     return [getPostReportInstruction({
       reporter: signer, trigger: toAddress(triggerAddress), report: await reportPda(triggerAddress, t.reportCount),
-      value: BigInt(value), monitorRef: await sha256(String(note).trim() || 'manual-admin-report'),
+      value: BigInt(value), monitorRef,
     })]
   },
 

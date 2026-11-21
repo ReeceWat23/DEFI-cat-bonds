@@ -9,13 +9,13 @@ import { FAMILY } from './types'
 import {
   isEvmAddress, sameEvmAddress, evmErrorName,
   useEvmWallet, useEvmBond, useEvmTrigger, useEvmTriggerHistory, useEvmPosition,
-  useEvmActions, useEvmTriggerActions, useEvmCreateTrigger, useEvmCreateBond,
+  useEvmActions, useEvmTriggerActions, useEvmCreateTrigger, useEvmCreateBond, useEvmNetworkIdentity,
 } from './evm/adapter'
 import {
   isSolanaAddress, useSolanaWallet, useSolanaBond, useSolanaTrigger, useSolanaTriggerHistory,
   useSolanaPosition, useSolanaActions, useSolanaTriggerActions, useSolanaCreateBond, useSolanaCreateTrigger,
 } from './solana/adapter'
-import { defaultNetwork } from './registry'
+import { defaultNetwork, networkById } from './registry'
 
 export { STATUS, FAMILY } from './types'
 export { NETWORKS, networkById, defaultNetwork } from './registry'
@@ -63,7 +63,8 @@ export function makeBondRef(input, network = null) {
   if (!family) return null
   // A bare Solana address is assumed to be on the default Solana network
   // (localnet while it's running, else devnet). EVM keeps `null` = the
-  // wallet's current chain until bonds carry their network (Phase E).
+  // wallet's current chain (Supabase rows record the exact network; reads
+  // follow the wallet).
   const net = network ?? (family === FAMILY.SOLANA ? defaultNetwork(FAMILY.SOLANA)?.id ?? null : null)
   return { family, network: net, address }
 }
@@ -71,6 +72,24 @@ export function makeBondRef(input, network = null) {
 const on = (ref, family) => (ref?.family === family ? ref : null)
 const onFamily = (family, wanted, value) => (family === wanted ? value : undefined)
 const pick = (family, byFamily) => byFamily[family] ?? byFamily[FAMILY.EVM]
+
+// ── Network identity (for the bond store) ────────────────────────────────────
+
+/**
+ * `async () => ({ network, environment })` for the chain a new deal is being
+ * posted to: the CAIP-2 id (local ids carry a per-run suffix) and its
+ * registry environment. Rows in Supabase copy both (plan §2.5, §3).
+ * Solana takes the registry network passed in; EVM uses the wallet's chain.
+ */
+export function useNetworkIdentity(family = FAMILY.EVM, network) {
+  const evm = useEvmNetworkIdentity()
+  const solana = async () => {
+    const net = networkById(network)
+    if (!net) throw new Error('no Solana network selected')
+    return { network: net.id, environment: net.environment }
+  }
+  return pick(family, { evm, solana })
+}
 
 // ── Wallet ───────────────────────────────────────────────────────────────────
 

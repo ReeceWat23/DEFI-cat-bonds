@@ -110,6 +110,17 @@ npm run localnet -- quick   # same, with a 1-min subscription / 5-min term
 
 The generated client is written to both `clients/js/generated/` (scripts) and `ui/src/chains/solana/generated/` (UI), so each resolves `@solana/kit` from its own `node_modules`. Never edit either by hand.
 
+## Bond store (Supabase) and trigger reporting
+
+Every `rpos` row records its chain: `network` (CAIP-2; local runs get a per-run id from the genesis / block-0 hash) and `environment` (`local` | `testnet` | `mainnet`). Clear throwaway local deals with `delete from rpos where environment = 'local'`; `DEAL 000/run.sh` clears earlier anvil runs' rows itself.
+
+```bash
+npx tsx scripts/e2e-bond-store.ts           # localnet + `python3 api/server.py` up: record → bond → link → read back
+python3 ../api/report_trigger.py <trigger>  # posts the monitor's latest value; Solana addresses go through scripts/trigger-cli.ts
+```
+
+`report_trigger.py` signs Solana reports with `.localnet/keys/company.json` by default (`--keypair` to override). If `.localnet/test-wallets.json` made your own wallet the reporter, that key is the only one allowed to post (`NotReporter` otherwise).
+
 ## TODO
 
 - [x] Install the toolchain, `anchor build`, `anchor keys sync` → program ID `3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj`
@@ -118,6 +129,7 @@ The generated client is written to both `clients/js/generated/` (scripts) and `u
 - [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
 - [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
 - [x] Coupon after a trigger: investors claim the full coupon, both chains
+- [x] Phase E: `network` / `environment` on `rpos`, bonds.py + server.py + Post deal pass them, Solana report path
 
 ## Future ideas
 

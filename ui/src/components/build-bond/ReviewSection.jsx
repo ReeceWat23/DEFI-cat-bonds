@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useWallet, useTrigger, useCreateBond, isValidAddress, FAMILY, defaultNetwork } from '../../chains'
+import { useWallet, useTrigger, useCreateBond, useNetworkIdentity, isValidAddress, FAMILY, defaultNetwork } from '../../chains'
 import { FilledButton, GhostButton, Panel } from './primitives'
 import { TESTNET_USDC, LOCAL_RDX_TOKEN, RHODEX_COMPANY_WALLET, CANONICAL_TRIGGERS } from '../../constants/abis'
 import { REGIONS } from '../../data/regionTaxonomy'
@@ -48,7 +48,7 @@ function estimateMaturityDate() {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-async function createDealRecord({ website, description, raise, trigger }) {
+async function createDealRecord({ website, description, raise, trigger, network, environment }) {
   const res = await fetch(BONDS_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -60,9 +60,14 @@ async function createDealRecord({ website, description, raise, trigger }) {
       triggerAddress: trigger.address,
       productId: trigger.productId,
       productVersion: trigger.productVersion,
+      network,
+      environment,
     }),
   })
-  if (!res.ok) throw new Error(`create-bond failed (${res.status})`)
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error || `create-bond failed (${res.status})`)
+  }
   const data = await res.json()
   if (!data.dealId) throw new Error(data.error || 'the bond store did not return a bond id')
   return data.dealId
@@ -126,6 +131,8 @@ export default function ReviewSection({ state, network }) {
   }
 
   const createBond = useCreateBond(family, solanaNetId)
+  const networkIdentity = useNetworkIdentity(family, solanaNetId)
+  const [dealNetwork, setDealNetwork] = useState(null)
   const { isWriting: bondPending, isConfirming: bondConfirming, error: bondError } = createBond.tx
 
   const [bondAddr, setBondAddr] = useState(null)
@@ -148,7 +155,7 @@ export default function ReviewSection({ state, network }) {
         fetch(`${BONDS_API}/link`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dealId, contractAddress: addr }),
+          body: JSON.stringify({ dealId, contractAddress: addr, network: dealNetwork }),
         }).catch(e => console.error('[postDeal] link-bond failed', e))
       }
     }
@@ -170,7 +177,11 @@ export default function ReviewSection({ state, network }) {
     const description = lossHistory ? `${summary}\n\nLoss history: ${lossHistory}` : summary
     let newDealId
     try {
+      // Which chain the row lives on: CAIP-2 id + environment (plan §2.5).
+      const { network, environment } = await networkIdentity()
+      setDealNetwork(network)
       newDealId = await createDealRecord({
+        network, environment,
         website: state.disclosure.website, description, raise: layer.raise,
         trigger: {
           address: triggerAddr,

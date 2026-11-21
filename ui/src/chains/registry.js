@@ -34,7 +34,7 @@ const CAT_BOND_PROGRAM_ID = '3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj'
 
 /** @type {NetworkConfig[]} */
 export const NETWORKS = [
-  // ── EVM ── (ids for real chains are fixed; anvil's gets a per-run suffix in Phase E)
+  // ── EVM ── (ids for real chains are fixed; anvil's per-run suffix is added at runtime, see useEvmNetworkIdentity)
   {
     id: 'eip155:31337', family: FAMILY.EVM, environment: 'local', label: 'Anvil (local)',
     chainId: 31337, rpcUrl: 'http://127.0.0.1:8545',
@@ -75,7 +75,7 @@ export const networkById = (id) => NETWORKS.find(n => n.id === id) ?? null
 /**
  * The network a bond is assumed to be on when only its address is known
  * (e.g. pasted into /deal). Solana: localnet while it's running, else devnet.
- * EVM keeps using the wallet's current chain until Phase E.
+ * EVM uses the wallet's current chain (Supabase rows record the exact network).
  */
 export function defaultNetwork(family) {
   if (family === FAMILY.SOLANA) {

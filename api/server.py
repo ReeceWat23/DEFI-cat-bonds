@@ -63,7 +63,14 @@ def _store_error(e):
 
 @app.get("/bonds")
 def get_bonds():
-    return jsonify(bonds.list_bonds(request.args.get("type", bonds.DEFAULT_TRIGGER_TYPE)))
+    try:
+        return jsonify(bonds.list_bonds(
+            request.args.get("type", bonds.DEFAULT_TRIGGER_TYPE),
+            environment=request.args.get("environment") or None,
+            network=request.args.get("network") or None,
+        ))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.get("/bonds/<deal_id>")
@@ -81,16 +88,21 @@ def get_bond_by_id(deal_id):
 @app.post("/bonds")
 def create_bond():
     body = request.get_json(force=True, silent=True) or {}
-    payload = bonds.build_bond_payload(
-        cedant=body.get("cedant", ""),
-        description=body.get("description", ""),
-        maturity=body.get("maturity", ""),
-        value=body.get("value", 0),
-        trigger_address=body.get("triggerAddress", ""),
-        product_id=body.get("productId", ""),
-        product_version=body.get("productVersion"),
-    )
-    row = bonds.create_bond(payload)
+    try:
+        payload = bonds.build_bond_payload(
+            cedant=body.get("cedant", ""),
+            description=body.get("description", ""),
+            maturity=body.get("maturity", ""),
+            value=body.get("value", 0),
+            trigger_address=body.get("triggerAddress", ""),
+            product_id=body.get("productId", ""),
+            product_version=body.get("productVersion"),
+            network=body.get("network", ""),
+            environment=body.get("environment", ""),
+        )
+        row = bonds.create_bond(payload)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     # CatBond.dealId is a string on-chain.
     return jsonify({"dealId": str(row["id"])})
 
@@ -108,6 +120,7 @@ def link_bond():
             trigger_address=body.get("triggerAddress"),
             product_id=body.get("productId"),
             product_version=body.get("productVersion"),
+            network=body.get("network"),
         )
     except bonds.BondNotFound:
         return jsonify({"error": "bond not found"}), 404

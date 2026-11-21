@@ -27,7 +27,12 @@ dev/local-anvil convenience wrapper used by `DEAL 000/run-insured-test.sh`:
 it resolves which product/metric a trigger reports on by reading its
 on-chain `productConfig()`, makes sure the monitor has polled at least once,
 builds the payload, and posts it via `cast send` (impersonation-based,
-anvil-only — see deploy_deal.py for the same pattern). On any real network
+anvil-only — see deploy_deal.py for the same pattern).
+
+A Solana trigger address (base58, not 0x…) takes the same steps through
+DEAL001/scripts/trigger-cli.ts instead: it reads the trigger account's
+product config and posts `post_report` signed by the reporter keypair
+(default: the localnet company key). Payload building is shared. On any real network
 this posting step would be the admin UI's own signed `postReport()`
 transaction instead, not this script.
 """
@@ -45,6 +50,8 @@ from monitor import scheduler, store  # noqa: E402
 from products import registry  # noqa: E402
 
 DEFAULT_RPC = "http://127.0.0.1:8545"
+DEAL001_DIR = os.path.join(os.path.dirname(__file__), "..", "DEAL001")
+TRIGGER_CLI = os.path.join("scripts", "trigger-cli.ts")
 DEFAULT_COMPANY = "0xE1ea925Bc3Ef4706ca6a22E72FC83828098377B9"  # DEAL 000's COMPANY constant
 
 
@@ -116,8 +123,11 @@ def _metric_for_trigger(trigger_address: str, rpc: str) -> tuple[str, int, str]:
     ).stdout
 
     product_id, version, value_path, *_ = json.loads(raw)
-    version = int(version)
+    return _match_metric(product_id, int(version), value_path)
 
+
+def _match_metric(product_id: str, version: int, value_path: str) -> tuple[str, int, str]:
+    """Find which metric of a registry product an on-chain valuePath reports on."""
     product = registry.get(product_id, version)
     for metric, path in product["value_paths"].items():
         # path is a single string, or a fallback chain (list) — the
@@ -128,6 +138,56 @@ def _metric_for_trigger(trigger_address: str, rpc: str) -> tuple[str, int, str]:
             return product_id, version, metric
     raise RuntimeError(f"no metric on {product_id} v{version} matches on-chain valuePath {value_path!r}")
 
+
+# ── Solana ───────────────────────────────────────────────────────────────
+
+def is_solana_address(address: str) -> bool:
+    """EVM addresses are 0x-hex; anything else here is a base58 Solana address."""
+    return not address.lower().startswith("0x")
+
+
+def _trigger_cli(*args: str) -> dict:
+    """Run DEAL001/scripts/trigger-cli.ts; it prints one JSON object."""
+    proc = subprocess.run(["npx", "tsx", TRIGGER_CLI, *args], cwd=DEAL001_DIR,
+                          capture_output=True, text=True)
+    lines = [line for line in proc.stdout.splitlines() if line.startswith("{")]
+    if not lines:
+        raise RuntimeError(f"trigger-cli.ts {args[0]} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    out = json.loads(lines[-1])
+    if proc.returncode != 0 or "error" in out:
+        raise RuntimeError(f"trigger-cli.ts {args[0]}: {out.get('error', proc.stderr.strip())}")
+    return out
+
+
+def _solana_options(rpc: str | None, keypair: str | None) -> list[str]:
+    opts = []
+    if rpc:
+        opts += ["--rpc", rpc]
+    if keypair:
+        opts += ["--keypair", keypair]
+    return opts
+
+
+def report_solana(trigger_address: str, rpc: str | None = None, keypair: str | None = None) -> dict:
+    """
+    Solana counterpart of report(): read the trigger account's product
+    config, poll the monitor, and post the latest successful entry with
+    `post_report`, signed by `keypair` (must be the trigger's reporter).
+    """
+    info = _trigger_cli("info", trigger_address, *_solana_options(rpc, None))
+    product_id, version, metric = _match_metric(info["productId"], info["version"], info["valuePath"])
+
+    scheduler.poll_all_active_products()
+    payload = build_report_payload(product_id, version, metric)
+
+    sent = _trigger_cli("post", trigger_address, str(payload["value"]), payload["monitor_ref"],
+                        *_solana_options(rpc, keypair))
+    payload.update(product_id=product_id, metric=metric,
+                   signature=sent["signature"], report_index=sent["reportIndex"])
+    return payload
+
+
+# ── EVM ──────────────────────────────────────────────────────────────────
 
 def report(trigger_address: str, rpc: str = DEFAULT_RPC, company: str = DEFAULT_COMPANY) -> dict:
     """
@@ -169,12 +229,18 @@ def report(trigger_address: str, rpc: str = DEFAULT_RPC, company: str = DEFAULT_
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("trigger_address")
-    parser.add_argument("--rpc", default=DEFAULT_RPC)
-    parser.add_argument("--company", default=DEFAULT_COMPANY)
+    parser.add_argument("trigger_address", help="0x… EVM trigger, or a base58 Solana trigger account")
+    parser.add_argument("--rpc", default=None,
+                        help=f"RPC URL (EVM default {DEFAULT_RPC}; Solana default: the running localnet)")
+    parser.add_argument("--company", default=DEFAULT_COMPANY, help="EVM reporter to impersonate on anvil")
+    parser.add_argument("--keypair", default=None,
+                        help="Solana reporter keypair JSON (default DEAL001/.localnet/keys/company.json)")
     args = parser.parse_args()
 
-    result = report(args.trigger_address, args.rpc, args.company)
+    if is_solana_address(args.trigger_address):
+        result = report_solana(args.trigger_address, args.rpc, args.keypair)
+    else:
+        result = report(args.trigger_address, args.rpc or DEFAULT_RPC, args.company)
     print(json.dumps(result, indent=2))
     print()
     print(f"Reported ${int(result['value']) / 1e9}B for {result['product_id']}.{result['metric']} "

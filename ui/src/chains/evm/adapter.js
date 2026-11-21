@@ -14,6 +14,10 @@ import { isAddress, keccak256, toHex, decodeErrorResult } from 'viem'
 import {
   CATBOND_ABI, CATBOND_BYTECODE, TRIGGER_ABI, TRIGGER_BYTECODE, ERC20_ABI,
 } from '../../constants/abis'
+import { NETWORKS } from '../registry'
+import { FAMILY } from '../types'
+
+const ANVIL_CHAIN_ID = 31337
 
 export const isEvmAddress = (s) => isAddress(s)
 
@@ -97,6 +101,29 @@ export function useEvmWallet() {
     isConnected,
     connect: () => connect({ connector: injected() }),
     disconnect: () => disconnect(),
+  }
+}
+
+/**
+ * Resolves the CAIP-2 id + environment of the wallet's current EVM chain,
+ * for the bond store (plan §2.5). Anvil gets a per-run suffix from its
+ * block-0 hash, the same id api/networks.py computes. Throws on a chain the
+ * registry doesn't list, rather than guessing its environment.
+ * @returns {() => Promise<{network: string, environment: string}>}
+ */
+export function useEvmNetworkIdentity() {
+  const { chainId } = useAccount()
+  const client = usePublicClient({ chainId })
+  return async () => {
+    if (!client) throw new Error('no EVM connection to identify the network')
+    const id = chainId ?? await client.getChainId()
+    if (id === ANVIL_CHAIN_ID) {
+      const block0 = await client.getBlock({ blockNumber: 0n })
+      return { network: `eip155:${id}:${block0.hash.slice(2, 18)}`, environment: 'local' }
+    }
+    const known = NETWORKS.find(n => n.family === FAMILY.EVM && n.chainId === id)
+    if (!known) throw new Error(`chain ${id} isn't a network RHODEX supports`)
+    return { network: known.id, environment: known.environment }
   }
 }
 

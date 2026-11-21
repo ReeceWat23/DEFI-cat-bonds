@@ -42,6 +42,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 import bonds  # noqa: E402
+import networks  # noqa: E402
 
 DEAL_000_DIR = os.path.join(os.path.dirname(__file__), "..", "DEAL 000")
 RPC_URL = "http://127.0.0.1:8545"
@@ -119,11 +120,20 @@ def main():
 
     print("── 1. Create draft bond record (web2) ──────────────────")
     fixture = load_fixture(fixture_path)
+    # Per-run anvil id (networks.py), so this run's addresses never collide
+    # with rows left over from earlier runs. Those are cleared first: a
+    # local chain's old rows point at contracts that no longer exist.
+    network = networks.evm_network_id(RPC_URL)
+    local = network.startswith("eip155:31337:")
+    cleared = bonds.clear_local_bonds("eip155:31337:", keep_network=network) if local else []
+    print(f"network: {network}" + (f"  (cleared {len(cleared)} rows from earlier local runs)" if cleared else ""))
     payload = bonds.build_bond_payload(
         cedant=fixture["cedant"],
         description=fixture["description"],
         maturity=fixture["maturity"],
         value=fixture["value"],
+        network=network,
+        environment="local" if local else "testnet",
     )
     deal_id = str(bonds.create_bond(payload)["id"])  # CatBond.dealId is a string
     print(f"dealId: {deal_id}")

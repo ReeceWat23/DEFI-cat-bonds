@@ -19,6 +19,10 @@ Env (.env at repo root):
 Functions return plain records, and what you write is what you read back
 (no read/write naming quirks).
 
+Every row names its chain: `network` is a CAIP-2 id (networks.py) and
+`environment` is 'local' | 'testnet' | 'mainnet'. Both are required on
+create, and contract addresses are unique per network, not globally.
+
 The bond id is Postgres's bigint `id`. CatBond.dealId is a string on-chain,
 so callers pass str(id) to the contract. Every function here accepts the
 id as either a str or an int.
@@ -39,6 +43,8 @@ STATUS_TRIGGERED = 1
 STATUS_MATURED   = 2
 VALID_STATUSES = (STATUS_OK, STATUS_TRIGGERED, STATUS_MATURED)
 
+ENVIRONMENTS = ("local", "testnet", "mainnet")
+
 DEFAULT_TRIGGER_TYPE = "natcat"
 
 # Columns a caller may write. id / created_at / updated_at are DB-managed.
@@ -46,6 +52,7 @@ WRITABLE_COLUMNS = (
     "cedant", "description", "maturity", "value", "status_triggered",
     "contract_address", "trigger_address", "trigger_type",
     "product_id", "product_version", "loss_history_path", "sov_path",
+    "network", "environment",
 )
 
 
@@ -114,6 +121,8 @@ def build_bond_payload(
     product_version: int | None = None,
     loss_history_path: str = "",
     sov_path: str = "",
+    network: str = "",
+    environment: str = "",
 ) -> dict:
     """
     Build a row for rpos. Unset fields become NULL instead of "":
@@ -123,6 +132,7 @@ def build_bond_payload(
     """
     if status_triggered not in VALID_STATUSES:
         raise ValueError(f"status_triggered must be one of {VALID_STATUSES}, got {status_triggered!r}")
+    _check_environment(environment)
     row = {
         "cedant":            cedant,
         "description":       description,
@@ -136,8 +146,15 @@ def build_bond_payload(
         "product_version":   product_version,
         "loss_history_path": loss_history_path,
         "sov_path":          sov_path,
+        "network":           network,
+        "environment":       environment,
     }
     return {k: (None if v == "" else v) for k, v in row.items()}
+
+
+def _check_environment(environment) -> None:
+    if environment not in ("", None) and environment not in ENVIRONMENTS:
+        raise ValueError(f"environment must be one of {ENVIRONMENTS}, got {environment!r}")
 
 
 # ── API calls ─────────────────────────────────────────────────────────────────
@@ -147,6 +164,10 @@ def create_bond(bond: dict) -> dict:
     unknown = set(bond) - set(WRITABLE_COLUMNS)
     if unknown:
         raise ValueError(f"unknown bond fields: {sorted(unknown)}")
+    missing = [col for col in ("network", "environment") if not bond.get(col)]
+    if missing:
+        raise ValueError(f"a bond needs {' and '.join(missing)} (which chain it lives on)")
+    _check_environment(bond["environment"])
     return _request("POST", body=bond, return_rows=True)[0]
 
 
@@ -156,16 +177,18 @@ def link_contract_address(
     trigger_address: str | None = None,
     product_id: str | None = None,
     product_version: int | None = None,
+    network: str | None = None,
 ) -> dict:
     """
     Attach the deployed CatBond address to a bond row, plus (optionally) the
-    trigger it settles on and that trigger's product. Fields left as None are
-    not touched, so a record that already has trigger details keeps them.
-    Returns the updated row.
+    trigger it settles on, that trigger's product, and the network it was
+    deployed to (in case it differs from the one the draft was created on).
+    Fields left as None are not touched, so a record that already has them
+    keeps them. Returns the updated row.
     """
     body = {"contract_address": contract_address}
     for col, val in (("trigger_address", trigger_address), ("product_id", product_id),
-                     ("product_version", product_version)):
+                     ("product_version", product_version), ("network", network)):
         if val not in (None, ""):
             body[col] = int(val) if col == "product_version" else val
     rows = _request("PATCH", params={"id": f"eq.{int(bond_id)}"}, body=body, return_rows=True)
@@ -187,13 +210,38 @@ def get_bond(bond_id) -> dict:
     return _single(rows, bond_id)
 
 
-def list_bonds(bond_type: str = DEFAULT_TRIGGER_TYPE) -> list[dict]:
-    """Every bond with this trigger_type, newest first."""
-    return _request("GET", params={
+def list_bonds(bond_type: str = DEFAULT_TRIGGER_TYPE, environment: str | None = None,
+               network: str | None = None) -> list[dict]:
+    """Every bond with this trigger_type, newest first, optionally narrowed
+    to one environment and/or network."""
+    _check_environment(environment)
+    params = {
         "trigger_type": f"eq.{bond_type}",
         "select": "*",
         "order": "created_at.desc",
-    })
+    }
+    if environment:
+        params["environment"] = f"eq.{environment}"
+    if network:
+        params["network"] = f"eq.{network}"
+    return _request("GET", params=params)
+
+
+def clear_local_bonds(network_prefix: str, keep_network: str | None = None) -> list[dict]:
+    """
+    Delete throwaway local rows whose network starts with `network_prefix`
+    (e.g. 'eip155:31337:' for every anvil run), optionally keeping the
+    current run's network. Scoped by prefix so restarting anvil doesn't wipe
+    a running Solana localnet's rows. Never touches testnet or mainnet rows.
+    Returns the deleted rows.
+    """
+    if not network_prefix:
+        raise ValueError("network_prefix is required")
+    conditions = [f"network.like.{network_prefix}*"]
+    if keep_network:
+        conditions.append(f"network.neq.{keep_network}")
+    params = {"environment": "eq.local", "and": f"({','.join(conditions)})"}
+    return _request("DELETE", params=params, return_rows=True)
 
 
 # ── Fake end-to-end flow (live — creates one real row) ─────────────────────────
@@ -207,6 +255,8 @@ if __name__ == "__main__":
         description="Smoke-test bond created by bonds.py __main__.",
         maturity="2027-08-20",
         value=500_000,
+        network="eip155:31337:smoketest",
+        environment="local",
     ))
     print("Created:", json.dumps(row, indent=2, default=str))
 
