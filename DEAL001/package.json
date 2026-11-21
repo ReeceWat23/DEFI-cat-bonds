@@ -6,7 +6,8 @@
   "scripts": {
     "codegen": "node scripts/generate-client.mjs",
     "localnet": "./scripts/localnet.sh",
-    "setup:local": "tsx scripts/setup-local.ts"
+    "setup:local": "tsx scripts/setup-local.ts",
+    "devnet": "./scripts/devnet.sh"
   },
   "devDependencies": {
     "@codama/nodes-from-anchor": "1.5.6",

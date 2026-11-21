@@ -121,6 +121,17 @@ python3 ../api/report_trigger.py <trigger>  # posts the monitor's latest value; 
 
 `report_trigger.py` signs Solana reports with `.localnet/keys/company.json` by default (`--keypair` to override). If `.localnet/test-wallets.json` made your own wallet the reporter, that key is the only one allowed to post (`NotReporter` otherwise).
 
+## Devnet (Phase F)
+
+```bash
+npm run devnet    # deploy/upgrade cat_bond on devnet, then canonical triggers + a small test bond
+```
+
+- **SOL:** the deployer (`.devnet/keys/deployer.json`, gitignored) needs ~4 SOL. The devnet RPC faucet is closed, so fund it at https://faucet.solana.com. The script prints the address and stops until it's funded.
+- **Upgrade authority:** that deployer key. Back it up: losing it means the devnet program can never be upgraded.
+- **USDC:** the test bond uses Circle devnet USDC (`4zMM…ncDU`), $10 coverage and a $0.80 coupon budget, with a 1-hour term. Fund the sponsor and an investor at https://faucet.circle.com (Solana Devnet). Devnet keys to import into a browser wallet are in `.devnet/wallets.txt`.
+- **Outputs:** `ui/src/chains/solana/devnet.json` (committed; the UI registry reads its triggers / company wallet / bonds).
+
 ## TODO
 
 - [x] Install the toolchain, `anchor build`, `anchor keys sync` → program ID `3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj`
@@ -129,6 +140,7 @@ python3 ../api/report_trigger.py <trigger>  # posts the monitor's latest value; 
 - [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
 - [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
 - [x] Coupon after a trigger: investors claim the full coupon, both chains
+- [ ] Phase F: fund the devnet deployer, `npm run devnet`, then one lifecycle with Circle devnet USDC
 - [x] Phase E: `network` / `environment` on `rpos`, bonds.py + server.py + Post deal pass them, Solana report path
 
 ## Future ideas

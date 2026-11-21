@@ -15,6 +15,11 @@ const localSolana = Object.values(
   import.meta.glob('./solana/localnet.json', { eager: true, import: 'default' }),
 )[0]
 
+// Written by DEAL001's `npm run devnet` (committed: devnet doesn't reset).
+const devnetSolana = Object.values(
+  import.meta.glob('./solana/devnet.json', { eager: true, import: 'default' }),
+)[0]
+
 const CAT_BOND_PROGRAM_ID = '3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj'
 
 /**
@@ -66,7 +71,9 @@ export const NETWORKS = [
     label: 'Solana devnet', rpcUrl: 'https://api.devnet.solana.com', walletChain: 'solana:devnet',
     programId: CAT_BOND_PROGRAM_ID,
     mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',   // Circle devnet USDC (plan §7.2)
-    triggers: {},                                          // created at devnet deploy (Phase F)
+    triggers: devnetSolana?.triggers ?? {},                // created by `npm run devnet` (Phase F)
+    companyWallet: devnetSolana?.companyWallet,
+    bonds: devnetSolana?.bonds ?? [],
   },
 ]
 
