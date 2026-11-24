@@ -1,0 +1,24 @@
+{
+  "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "environment": "testnet",
+  "rpcUrl": "https://api.devnet.solana.com",
+  "programId": "3UQzswu1vGu8DoGAttWtWRm3zFvCSvreoG7HDohTqxAj",
+  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  "companyWallet": "F6F5PTTi3pg4pNpfF4cFnDbSckgbxsvFQzJ6WSGJn6Lh",
+  "triggers": {
+    "economic": "7hsCgMrHkfY1Mw6pu2zPPK4L9RQMbm8vFG9hLZUXJz44",
+    "industry": "7SKWxCwKcbbgS4jDzSJNiLWdP6VCW9qoMdeUWdpCwWzu"
+  },
+  "bonds": [
+    {
+      "address": "H84sGRcrkBFxTZzsCNptLmD27Y94SNyypbMC9jVNFH8S",
+      "dealId": "DEAL001-devnet-1"
+    }
+  ],
+  "wallets": {
+    "deployer": "3dMCmKXshuMNh2LnLDdfVg3hVe2S5pV11eeSR8tnmeoG",
+    "company": "Bhwfr5RDTqkugxy8y97VS9Kx4kQ2SWbZMg7EGHQ2aLSk",
+    "sponsor": "9kxz8v7qYnLLcUDeQz8NYoAqQRDofdGvcPSRrTz5owJ4"
+  },
+  "updatedAt": "2026-11-24T00:23:36.151Z"
+}
