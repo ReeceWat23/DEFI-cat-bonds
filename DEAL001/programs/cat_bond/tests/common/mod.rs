@@ -285,6 +285,13 @@ impl Deal {
     /// Default bond args from `terms`, with `edit` applied first (for
     /// invalid-parameter tests).
     pub fn create_bond_with(&mut self, edit: impl FnOnce(&mut CreateBondArgs)) -> TxResult {
+        let sponsor = self.sponsor.insecure_clone();
+        self.create_bond_by(&sponsor, edit)
+    }
+
+    /// Like `create_bond_with`, but `payer` posts the deal (signs + pays rent)
+    /// for `self.sponsor`, as an EVM deployer passes `_sponsor`.
+    pub fn create_bond_by(&mut self, payer: &Keypair, edit: impl FnOnce(&mut CreateBondArgs)) -> TxResult {
         let t = &self.terms;
         let mut args = CreateBondArgs {
             bond_id: self.bond_id,
@@ -307,6 +314,7 @@ impl Deal {
         edit(&mut args);
         let ix = Self::ix(
             cat_bond::accounts::CreateBond {
+                payer: payer.pubkey(),
                 sponsor: self.sponsor.pubkey(),
                 trigger: self.trigger,
                 mint: self.mint,
@@ -317,8 +325,7 @@ impl Deal {
             },
             cat_bond::instruction::CreateBond { args },
         );
-        let sponsor = self.sponsor.insecure_clone();
-        self.send(ix, &sponsor)
+        self.send(ix, payer)
     }
 
     /// `signer` claims to be the sponsor; fees go to the company's token account.

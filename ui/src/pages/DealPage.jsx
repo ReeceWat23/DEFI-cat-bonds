@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useWallet, useBond, useTrigger, useBondPosition, useBondActions,
-  makeBondRef, sameAddress, errorName,
+  makeBondRef, resolveBondRef, sameAddress, errorName,
 } from '../chains'
 import { ActionButton, Surface, Tag } from '../theme/primitives'
 import { useTheme } from '../theme/ThemeProvider'
@@ -504,8 +504,9 @@ export default function DealPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem('catbond_address')
-    const ref = saved && makeBondRef(saved)
-    if (ref) { setBondRef(ref); setBondInput(saved) }
+    if (!saved || !makeBondRef(saved)) return
+    setBondInput(saved)
+    resolveBondRef(saved).then(ref => ref && setBondRef(ref))
   }, [])
 
   // ── Chain reads (via the chains/ adapter — no ABI knowledge in this page) ──
@@ -541,7 +542,7 @@ export default function DealPage() {
 
   // ── Trigger reads — the trigger is an append-only report log (§2.4), not
   // a triggered flag; same source AdminPage's ManageSection reads. ──
-  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(bondRef?.family, triggerAddr)
+  const { trigger: triggerData, refetch: refetchTrigger } = useTrigger(bondRef?.family, triggerAddr, bondRef?.network)
   const reportCount = triggerData?.reportCount
   const latestValue = triggerData?.latest?.value
   const valuePath   = triggerData?.valuePath
@@ -612,9 +613,9 @@ export default function DealPage() {
     ? Math.min(100, Number((alreadyClaimed ?? 0n) * 100n / totalCoupon))
     : 0
 
-  function loadBond() {
-    const ref = makeBondRef(bondInput)
-    if (!ref) return alert('Not a valid bond address. Paste an EVM (0x…) or Solana address.')
+  async function loadBond() {
+    if (!makeBondRef(bondInput)) return alert('Not a valid bond address. Paste an EVM (0x…) or Solana address.')
+    const ref = await resolveBondRef(bondInput)
     setBondRef(ref)
     localStorage.setItem('catbond_address', bondInput)
     setDepositInput('')

@@ -31,9 +31,16 @@ pub struct CreateBondArgs {
 #[derive(Accounts)]
 #[instruction(args: CreateBondArgs)]
 pub struct CreateBond<'info> {
-    /// The sponsor posts the deal and pays rent for its accounts.
+    /// Whoever posts the deal (the EVM deployer): signs and pays rent for
+    /// the bond and vault. Gets no rights over the bond.
     #[account(mut)]
-    pub sponsor: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// CHECK: just an address, like the EVM constructor's `_sponsor`: it
+    /// never signs here. Only this wallet can later fund the coupon budget
+    /// (fund_coupon_budget requires its signature), and it receives
+    /// principal on a trigger and any undersubscription refund.
+    pub sponsor: UncheckedAccount<'info>,
 
     /// Typed as `Account<Trigger>`, so Anchor checks it is owned by this
     /// program and carries the Trigger discriminator. That replaces the
@@ -45,7 +52,7 @@ pub struct CreateBond<'info> {
 
     #[account(
         init,
-        payer = sponsor,
+        payer = payer,
         space = 8 + Bond::INIT_SPACE,
         seeds = [BOND_SEED, sponsor.key().as_ref(), args.bond_id.as_ref()],
         bump,
@@ -55,7 +62,7 @@ pub struct CreateBond<'info> {
     /// Holds coupon budget + principal. Owned by the bond PDA.
     #[account(
         init,
-        payer = sponsor,
+        payer = payer,
         seeds = [VAULT_SEED, bond.key().as_ref()],
         bump,
         token::mint = mint,
@@ -80,6 +87,7 @@ pub fn create_bond(ctx: Context<CreateBond>, args: CreateBondArgs) -> Result<()>
     // Sanity checks the EVM version left implicit. term_duration > 0 also
     // guards the coupon-vesting division.
     require_keys_neq!(args.company_wallet, Pubkey::default(), CatBondError::ZeroAddress);
+    require_keys_neq!(ctx.accounts.sponsor.key(), Pubkey::default(), CatBondError::ZeroAddress);
     require_keys_neq!(args.company_wallet, ctx.accounts.sponsor.key(), CatBondError::ConflictOfInterest);
     require!(args.coverage_amount > 0, CatBondError::InvalidParams);
     require!(args.min_investment > 0 && args.min_investment <= args.coverage_amount, CatBondError::InvalidParams);

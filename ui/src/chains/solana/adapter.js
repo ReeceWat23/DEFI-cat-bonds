@@ -18,7 +18,7 @@ import {
   decodeBond, decodePosition, decodeReport, decodeTrigger, findPositionPda,
 } from './generated'
 import { ata, build, chainError, fetchAllTyped, fetchTyped, reportPda, sendInstructions } from './core'
-import { defaultNetwork, networkById } from '../registry'
+import { NETWORKS, defaultNetwork, networkById } from '../registry'
 import { FAMILY } from '../types'
 
 export const isSolanaAddress = (s) => isAddress(s)
@@ -31,6 +31,25 @@ function rpcFor(networkId) {
   if (!net) throw new Error('No Solana network configured')
   if (!rpcCache.has(net.rpcUrl)) rpcCache.set(net.rpcUrl, createSolanaRpc(net.rpcUrl))
   return { rpc: rpcCache.get(net.rpcUrl), net }
+}
+
+/**
+ * Which Solana network a bare bond address lives on: a bond the registry
+ * already lists for a network, else the first network whose RPC holds a
+ * cat_bond Bond account at that address (localnet first, then devnet).
+ * Unreachable RPCs (localnet not running) are skipped. null if none has it.
+ */
+export async function findSolanaBondNetwork(bondAddress) {
+  const nets = NETWORKS.filter(n => n.family === FAMILY.SOLANA)
+  const listed = nets.find(n => (n.bonds ?? []).some(b => b.address === bondAddress))
+  if (listed) return listed.id
+  for (const net of nets) {
+    try {
+      const { rpc } = rpcFor(net.id)
+      if ((await fetchTyped(rpc, bondAddress, BOND_DISCRIMINATOR, decodeBond)).exists) return net.id
+    } catch { /* RPC down or account unreadable: try the next network */ }
+  }
+  return null
 }
 
 /** Network id a ref resolves to (its own, or the Solana default). */
@@ -246,8 +265,9 @@ export function useSolanaTriggerActions(networkId) {
 
 // ── Creation ─────────────────────────────────────────────────────────────────
 // Solana bonds and triggers are PDAs: creating one is an instruction signed
-// by the connected wallet, which becomes the sponsor (bonds) or owner
-// (triggers). `createdAddress` is the new PDA once confirmed.
+// (and paid for) by the connected wallet. A bond's sponsor is whatever
+// address is passed, as on EVM; a trigger's owner is the signer.
+// `createdAddress` is the new PDA once confirmed.
 
 function useSolanaCreate(networkId, builderName) {
   const { run, tx } = useSolanaWriteSlot()
@@ -267,7 +287,7 @@ function useSolanaCreate(networkId, builderName) {
   return { tx, createdAddress, create }
 }
 
-/** Same params as the EVM useEvmCreateBond; the connected wallet is the sponsor. */
+/** Same params as the EVM useEvmCreateBond; `sponsor` is any address (defaults to the wallet). */
 export const useSolanaCreateBond = (networkId) => useSolanaCreate(networkId, 'createBond')
 
 /** Same params as the EVM useEvmCreateTrigger; the connected wallet is the owner. */

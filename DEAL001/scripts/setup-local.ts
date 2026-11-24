@@ -206,7 +206,7 @@ async function main() {
   const bond = await bondPda(sponsor.address, bondId)
   await send(sponsor, [
     await getCreateBondInstructionAsync({
-      sponsor, trigger: triggers.economic, mint: mint.address, bond, bondId,
+      payer: sponsor, sponsor: sponsor.address, trigger: triggers.economic, mint: mint.address, bond, bondId,
       companyWallet, dealId: DEAL_ID, ...BOND_TERMS,
     }),
   ])

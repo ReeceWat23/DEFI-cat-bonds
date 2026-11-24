@@ -18,6 +18,24 @@ fn only_the_sponsor_can_fund() {
     assert_fails_with(d.fund(&inv0), code(CatBondError::NotSponsor));
 }
 
+/// EVM parity: anyone can post a deal naming a sponsor (the constructor's
+/// `_sponsor` is just an address); only that sponsor can then fund it.
+#[test]
+fn anyone_can_post_a_bond_for_a_sponsor_but_only_the_sponsor_funds_it() {
+    let mut d = Deal::bare(Terms::default());
+    ok(d.create_trigger());
+    let (stranger, sponsor) = (d.stranger.insecure_clone(), d.sponsor.insecure_clone());
+
+    ok(d.create_bond_by(&stranger, |_| {}));
+    let b = d.bond_state();
+    assert_eq!(b.sponsor, sponsor.pubkey());
+    assert_eq!(b.status, Status::Funding);
+
+    assert_fails_with(d.fund(&stranger), code(CatBondError::NotSponsor));
+    ok(d.fund(&sponsor));
+    assert_eq!(d.bond_state().status, Status::Subscription);
+}
+
 #[test]
 fn only_the_company_can_settle_or_mature() {
     let mut d = Deal::new();

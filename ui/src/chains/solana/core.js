@@ -249,18 +249,17 @@ export const build = {
   },
 
   /**
-   * Same params as the EVM useEvmCreateBond. The signer is the sponsor (it
-   * signs the bond into existence); bond_id = sha256(dealId).
+   * Same params as the EVM useEvmCreateBond. The signer posts the deal and
+   * pays rent (the EVM deployer); `p.sponsor` is just an address, like the
+   * EVM `_sponsor`, defaulting to the signer. bond_id = sha256(dealId).
    * Returns `{ instructions, address }`.
    */
   async createBond(signer, p) {
-    if (p.sponsor && p.sponsor !== signer.address) {
-      throw chainError('On Solana the sponsor must be the connected wallet, which signs the bond into existence.')
-    }
+    const sponsor = toAddress(p.sponsor ?? signer.address)
     const bondId = await sha256(String(p.dealId))
-    const bond = await pdaOf(['bond', getAddressEncoder().encode(signer.address), bondId])
+    const bond = await pdaOf(['bond', getAddressEncoder().encode(sponsor), bondId])
     const ix = await getCreateBondInstructionAsync({
-      sponsor: signer, trigger: toAddress(p.trigger), mint: toAddress(p.mint), bond, bondId,
+      payer: signer, sponsor, trigger: toAddress(p.trigger), mint: toAddress(p.mint), bond, bondId,
       companyWallet: toAddress(p.companyWallet), threshold: BigInt(p.threshold),
       couponRateBps: Number(p.couponRateBps), coverageAmount: BigInt(p.coverageAmount),
       minInvestment: BigInt(p.minInvestment), subscriptionDuration: BigInt(p.subscriptionDuration),

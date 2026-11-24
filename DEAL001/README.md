@@ -70,7 +70,7 @@ anchor build && anchor keys sync && anchor build                  # real program
 ```bash
 cd DEAL001
 anchor build                    # tests load target/deploy/cat_bond.so
-cargo test                      # 32 tests, < 1 s
+cargo test                      # 33 tests, < 1 s
 npx tsx scripts/e2e-ui-core.ts  # with `npm run localnet` up: the UI's own Solana tx code, end to end
 ```
 
@@ -130,6 +130,7 @@ npm run devnet    # deploy/upgrade cat_bond on devnet, then canonical triggers +
 - **SOL:** the deployer (`.devnet/keys/deployer.json`, gitignored) needs ~4 SOL. The devnet RPC faucet is closed, so fund it at https://faucet.solana.com. The script prints the address and stops until it's funded.
 - **Upgrade authority:** that deployer key. Back it up: losing it means the devnet program can never be upgraded.
 - **USDC:** the test bond uses Circle devnet USDC (`4zMM…ncDU`), $10 coverage and a $0.80 coupon budget, with a 1-hour term. Fund the sponsor and an investor at https://faucet.circle.com (Solana Devnet). Devnet keys to import into a browser wallet are in `.devnet/wallets.txt`.
+- **Another sponsor:** `SPONSOR=<address> DEAL_ID=DEAL001-devnet-N npx tsx scripts/setup-devnet.ts` posts a new bond for any wallet. As on EVM, the sponsor is just an address at creation (the deployer signs and pays rent); only that wallet can fund the coupon budget.
 - **Outputs:** `ui/src/chains/solana/devnet.json` (committed; the UI registry reads its triggers / company wallet / bonds).
 
 ## TODO
@@ -140,7 +141,9 @@ npm run devnet    # deploy/upgrade cat_bond on devnet, then canonical triggers +
 - [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
 - [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
 - [x] Coupon after a trigger: investors claim the full coupon, both chains
-- [ ] Phase F: fund the devnet deployer, `npm run devnet`, then one lifecycle with Circle devnet USDC
+- [x] EVM parity: `create_bond` takes the sponsor as an address with a separate `payer` signer, like the EVM constructor's `_sponsor`
+- [x] Phase F: devnet deploy + triggers + test bonds
+- [ ] One full lifecycle on devnet with Circle devnet USDC
 - [x] Phase E: `network` / `environment` on `rpos`, bonds.py + server.py + Post deal pass them, Solana report path
 
 ## Future ideas

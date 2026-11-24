@@ -17,6 +17,7 @@ import {
   SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
   SolanaError,
   type Address,
+  type ClientWithPayer,
   type ClientWithRpc,
   type ClientWithTransactionPlanning,
   type ClientWithTransactionSending,
@@ -687,7 +688,7 @@ export type CatBondPluginInstructions = {
   ) => ReturnType<typeof getCloseSubscriptionInstruction> &
     SelfPlanAndSendFunctions;
   createBond: (
-    input: CreateBondAsyncInput,
+    input: MakeOptional<CreateBondAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getCreateBondInstructionAsync> &
     SelfPlanAndSendFunctions;
@@ -740,6 +741,7 @@ export type CatBondPluginPdas = {
 export type CatBondPluginRequirements = ClientWithRpc<
   GetAccountInfoApi & GetMultipleAccountsApi
 > &
+  ClientWithPayer &
   ClientWithTransactionPlanning &
   ClientWithTransactionSending;
 
@@ -785,10 +787,13 @@ export function catBondProgram(
           createBond: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
-              getCreateBondInstructionAsync(input, {
-                programAddress:
-                  instructionConfig?.programAddress ?? config.programAddress,
-              }),
+              getCreateBondInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
             ),
           createTrigger: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
@@ -882,3 +887,5 @@ export function catBondProgram(
     });
   };
 }
+
+type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;

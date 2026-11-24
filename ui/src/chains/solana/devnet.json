@@ -12,7 +12,13 @@
   "bonds": [
     {
       "address": "H84sGRcrkBFxTZzsCNptLmD27Y94SNyypbMC9jVNFH8S",
-      "dealId": "DEAL001-devnet-1"
+      "dealId": "DEAL001-devnet-1",
+      "sponsor": "9kxz8v7qYnLLcUDeQz8NYoAqQRDofdGvcPSRrTz5owJ4"
+    },
+    {
+      "address": "AkN2BEac5qPTwDitifuicWrsbMymK9GevrhrRDrgk43f",
+      "dealId": "DEAL001-devnet-2",
+      "sponsor": "FQBUvjyzM9JkH3uqpKQwumJfRcpweRS8RxQJUPZq7MLK"
     }
   ],
   "wallets": {
@@ -20,5 +26,5 @@
     "company": "Bhwfr5RDTqkugxy8y97VS9Kx4kQ2SWbZMg7EGHQ2aLSk",
     "sponsor": "9kxz8v7qYnLLcUDeQz8NYoAqQRDofdGvcPSRrTz5owJ4"
   },
-  "updatedAt": "2026-11-24T00:23:36.151Z"
+  "updatedAt": "2026-11-24T23:27:00.827Z"
 }

@@ -7,8 +7,8 @@
 //   2. Creates the two canonical triggers (owner = devnet company). Reporter =
 //      your test company from .localnet/test-wallets.json if present (so you can
 //      post reports from the Admin page), else the devnet company.
-//   3. Creates one small-terms test bond on Circle devnet USDC, sponsored by the
-//      generated devnet sponsor. Funding it needs USDC from https://faucet.circle.com
+//   3. Creates one small-terms test bond on Circle devnet USDC, posted by the
+//      deployer for the generated devnet sponsor (or SPONSOR=<address>). Funding it needs USDC from https://faucet.circle.com
 //      (Solana Devnet) in the sponsor's and an investor's wallets.
 //
 // Keys (gitignored): DEAL001/.devnet/keys/{deployer,company,sponsor}.json.
@@ -51,7 +51,13 @@ const PRODUCT = {                                // same as setup-local.ts / DEA
   endpoint: 'https://nqldthhutpfxpxnqqxsk.supabase.co/rest/v1/natcat_latest',
 }
 const VALUE_PATHS = { economic: '[0].economic_loss_b', industry: '[0].industry_loss_b' }
-const DEAL_ID = 'DEAL001-devnet-1'
+// SPONSOR=<address> names another wallet as the bond's sponsor: just an
+// address, as with the EVM constructor's `_sponsor`, so no key is needed (the
+// deployer posts the deal and pays its rent; only the sponsor can fund it).
+// Give it its own DEAL_ID so it gets a new bond, e.g.
+//   SPONSOR=FQBU… DEAL_ID=DEAL001-devnet-2 npx tsx scripts/setup-devnet.ts
+const DEAL_ID = process.env.DEAL_ID ?? 'DEAL001-devnet-1'
+const SPONSOR = process.env.SPONSOR
 // Small enough to fund from the Circle faucet: $10 coverage → $0.80 coupon budget.
 const BOND_TERMS = {
   threshold: 370n * 1_000_000_000n,
@@ -105,6 +111,10 @@ function testCompany(): Address | null {
   return c ? address(String(c)) : null
 }
 
+function previousBonds(): { address: string, dealId: string, sponsor?: string }[] {
+  try { return JSON.parse(fs.readFileSync(UI_REGISTRY_FILE, 'utf8')).bonds ?? [] } catch { return [] }
+}
+
 const pda = async (seeds: (string | Uint8Array)[]) =>
   (await getProgramDerivedAddress({ programAddress: CAT_BOND_PROGRAM_ADDRESS, seeds }))[0]
 
@@ -126,7 +136,7 @@ async function main() {
     console.log(`  ${name.padEnd(8)} ${w.signer.address}`)
   }
   const company = wallets.company.signer
-  const sponsor = wallets.sponsor.signer
+  const sponsor = SPONSOR ? address(SPONSOR) : wallets.sponsor.signer.address
   const test = testCompany()
   const companyWallet = test ?? company.address
   const reporter = companyWallet
@@ -151,12 +161,12 @@ async function main() {
 
   step('3. Small-terms test bond (Circle devnet USDC)')
   const bondId = sha256(DEAL_ID)
-  const bond = await pda(['bond', getAddressEncoder().encode(sponsor.address), bondId])
+  const bond = await pda(['bond', getAddressEncoder().encode(sponsor), bondId])
   if ((await fetchMaybeBond(rpc, bond)).exists) {
     console.log(`  bond     ${bond}  (exists)`)
   } else {
-    await send(sponsor, [await getCreateBondInstructionAsync({
-      sponsor, trigger: triggers.economic, mint: CIRCLE_DEVNET_USDC, bond, bondId,
+    await send(deployer, [await getCreateBondInstructionAsync({
+      payer: deployer, sponsor, trigger: triggers.economic, mint: CIRCLE_DEVNET_USDC, bond, bondId,
       companyWallet, dealId: DEAL_ID, ...BOND_TERMS,
     })])
     console.log(`  bond     ${bond}   dealId "${DEAL_ID}"`)
@@ -173,8 +183,8 @@ async function main() {
     mint: CIRCLE_DEVNET_USDC,
     companyWallet,
     triggers,
-    bonds: [{ address: bond, dealId: DEAL_ID }],
-    wallets: { deployer: deployer.address, company: company.address, sponsor: sponsor.address },
+    bonds: [...previousBonds().filter(x => x.address !== bond), { address: bond, dealId: DEAL_ID, sponsor }],
+    wallets: { deployer: deployer.address, company: company.address, sponsor: wallets.sponsor.signer.address },
     updatedAt: new Date().toISOString(),
   }
   fs.writeFileSync(UI_REGISTRY_FILE, JSON.stringify(publicInfo, null, 2) + '\n')
@@ -189,7 +199,7 @@ async function main() {
   step('Done')
   console.log(`  bond      ${bond}   ← paste into /deal`)
   console.log(`  fund it:  Circle devnet USDC (https://faucet.circle.com, Solana Devnet) to`)
-  console.log(`            sponsor ${sponsor.address}  (needs 0.804 USDC)`)
+  console.log(`            sponsor ${sponsor}  (needs 0.804 USDC)`)
   console.log(`            and an investor wallet (up to 10.05 USDC for full coverage)`)
   console.log(`  wrote     ui/src/chains/solana/devnet.json, DEAL001/.devnet/{addresses.json,wallets.txt}\n`)
 }

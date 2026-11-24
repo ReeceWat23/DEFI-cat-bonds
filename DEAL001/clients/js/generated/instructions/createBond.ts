@@ -78,6 +78,7 @@ export function getCreateBondDiscriminatorBytes(): ReadonlyUint8Array {
 
 export type CreateBondInstruction<
   TProgram extends string = typeof CAT_BOND_PROGRAM_ADDRESS,
+  TAccountPayer extends string | AccountMeta<string> = string,
   TAccountSponsor extends string | AccountMeta<string> = string,
   TAccountTrigger extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
@@ -92,9 +93,12 @@ export type CreateBondInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
+      TAccountPayer extends string
+        ? WritableSignerAccount<TAccountPayer> &
+            AccountSignerMeta<TAccountPayer>
+        : TAccountPayer,
       TAccountSponsor extends string
-        ? WritableSignerAccount<TAccountSponsor> &
-            AccountSignerMeta<TAccountSponsor>
+        ? ReadonlyAccount<TAccountSponsor>
         : TAccountSponsor,
       TAccountTrigger extends string
         ? ReadonlyAccount<TAccountTrigger>
@@ -197,7 +201,8 @@ export function getCreateBondInstructionDataCodec(): Codec<
 }
 
 export type CreateBondAsyncInput<
-  TAccountSponsor extends InstructionSignerInput = InstructionSignerInput,
+  TAccountPayer extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSponsor extends InstructionAccountInput = InstructionAccountInput,
   TAccountTrigger extends InstructionAccountInput = InstructionAccountInput,
   TAccountMint extends InstructionAccountInput = InstructionAccountInput,
   TAccountBond extends InstructionAccountInput = InstructionAccountInput,
@@ -207,7 +212,16 @@ export type CreateBondAsyncInput<
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
-  /** The sponsor posts the deal and pays rent for its accounts. */
+  /**
+   * Whoever posts the deal (the EVM deployer): signs and pays rent for
+   * the bond and vault. Gets no rights over the bond.
+   */
+  payer: TAccountPayer;
+  /**
+   * never signs here. Only this wallet can later fund the coupon budget
+   * (fund_coupon_budget requires its signature), and it receives
+   * principal on a trigger and any undersubscription refund.
+   */
   sponsor: TAccountSponsor;
   /**
    * Typed as `Account<Trigger>`, so Anchor checks it is owned by this
@@ -236,7 +250,8 @@ export type CreateBondAsyncInput<
 };
 
 export async function getCreateBondInstructionAsync<
-  TAccountSponsor extends InstructionSignerInput,
+  TAccountPayer extends InstructionSignerInput,
+  TAccountSponsor extends InstructionAccountInput,
   TAccountTrigger extends InstructionAccountInput,
   TAccountMint extends InstructionAccountInput,
   TAccountBond extends InstructionAccountInput,
@@ -246,6 +261,7 @@ export async function getCreateBondInstructionAsync<
   TProgramAddress extends Address = typeof CAT_BOND_PROGRAM_ADDRESS,
 >(
   input: CreateBondAsyncInput<
+    TAccountPayer,
     TAccountSponsor,
     TAccountTrigger,
     TAccountMint,
@@ -260,6 +276,10 @@ export async function getCreateBondInstructionAsync<
 ): Promise<
   CreateBondInstruction<
     TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountPayer,
+      InstructionAccountInputAddress<TAccountPayer>
+    >,
     ResolvedInstructionAccountMeta<
       TAccountSponsor,
       InstructionAccountInputAddress<TAccountSponsor>
@@ -303,7 +323,12 @@ export async function getCreateBondInstructionAsync<
 
   // Original accounts.
   const originalAccounts = {
-    sponsor: { value: input.sponsor ?? null, isSigner: true, isWritable: true },
+    payer: { value: input.payer ?? null, isSigner: true, isWritable: true },
+    sponsor: {
+      value: input.sponsor ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     trigger: {
       value: input.trigger ?? null,
       isSigner: false,
@@ -354,6 +379,7 @@ export async function getCreateBondInstructionAsync<
 
   return Object.freeze({
     accounts: [
+      getAccountMeta("payer", accounts.payer),
       getAccountMeta("sponsor", accounts.sponsor),
       getAccountMeta("trigger", accounts.trigger),
       getAccountMeta("mint", accounts.mint),
@@ -368,6 +394,10 @@ export async function getCreateBondInstructionAsync<
     programAddress,
   } as CreateBondInstruction<
     TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountPayer,
+      InstructionAccountInputAddress<TAccountPayer>
+    >,
     ResolvedInstructionAccountMeta<
       TAccountSponsor,
       InstructionAccountInputAddress<TAccountSponsor>
@@ -400,7 +430,8 @@ export async function getCreateBondInstructionAsync<
 }
 
 export type CreateBondInput<
-  TAccountSponsor extends InstructionSignerInput = InstructionSignerInput,
+  TAccountPayer extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSponsor extends InstructionAccountInput = InstructionAccountInput,
   TAccountTrigger extends InstructionAccountInput = InstructionAccountInput,
   TAccountMint extends InstructionAccountInput = InstructionAccountInput,
   TAccountBond extends InstructionAccountInput = InstructionAccountInput,
@@ -410,7 +441,16 @@ export type CreateBondInput<
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
-  /** The sponsor posts the deal and pays rent for its accounts. */
+  /**
+   * Whoever posts the deal (the EVM deployer): signs and pays rent for
+   * the bond and vault. Gets no rights over the bond.
+   */
+  payer: TAccountPayer;
+  /**
+   * never signs here. Only this wallet can later fund the coupon budget
+   * (fund_coupon_budget requires its signature), and it receives
+   * principal on a trigger and any undersubscription refund.
+   */
   sponsor: TAccountSponsor;
   /**
    * Typed as `Account<Trigger>`, so Anchor checks it is owned by this
@@ -439,7 +479,8 @@ export type CreateBondInput<
 };
 
 export function getCreateBondInstruction<
-  TAccountSponsor extends InstructionSignerInput,
+  TAccountPayer extends InstructionSignerInput,
+  TAccountSponsor extends InstructionAccountInput,
   TAccountTrigger extends InstructionAccountInput,
   TAccountMint extends InstructionAccountInput,
   TAccountBond extends InstructionAccountInput,
@@ -449,6 +490,7 @@ export function getCreateBondInstruction<
   TProgramAddress extends Address = typeof CAT_BOND_PROGRAM_ADDRESS,
 >(
   input: CreateBondInput<
+    TAccountPayer,
     TAccountSponsor,
     TAccountTrigger,
     TAccountMint,
@@ -462,6 +504,10 @@ export function getCreateBondInstruction<
   },
 ): CreateBondInstruction<
   TProgramAddress,
+  ResolvedInstructionAccountMeta<
+    TAccountPayer,
+    InstructionAccountInputAddress<TAccountPayer>
+  >,
   ResolvedInstructionAccountMeta<
     TAccountSponsor,
     InstructionAccountInputAddress<TAccountSponsor>
@@ -504,7 +550,12 @@ export function getCreateBondInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    sponsor: { value: input.sponsor ?? null, isSigner: true, isWritable: true },
+    payer: { value: input.payer ?? null, isSigner: true, isWritable: true },
+    sponsor: {
+      value: input.sponsor ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
     trigger: {
       value: input.trigger ?? null,
       isSigner: false,
@@ -544,6 +595,7 @@ export function getCreateBondInstruction<
 
   return Object.freeze({
     accounts: [
+      getAccountMeta("payer", accounts.payer),
       getAccountMeta("sponsor", accounts.sponsor),
       getAccountMeta("trigger", accounts.trigger),
       getAccountMeta("mint", accounts.mint),
@@ -558,6 +610,10 @@ export function getCreateBondInstruction<
     programAddress,
   } as CreateBondInstruction<
     TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountPayer,
+      InstructionAccountInputAddress<TAccountPayer>
+    >,
     ResolvedInstructionAccountMeta<
       TAccountSponsor,
       InstructionAccountInputAddress<TAccountSponsor>
@@ -595,21 +651,30 @@ export type ParsedCreateBondInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    /** The sponsor posts the deal and pays rent for its accounts. */
-    sponsor: TAccountMetas[0];
+    /**
+     * Whoever posts the deal (the EVM deployer): signs and pays rent for
+     * the bond and vault. Gets no rights over the bond.
+     */
+    payer: TAccountMetas[0];
+    /**
+     * never signs here. Only this wallet can later fund the coupon budget
+     * (fund_coupon_budget requires its signature), and it receives
+     * principal on a trigger and any undersubscription refund.
+     */
+    sponsor: TAccountMetas[1];
     /**
      * Typed as `Account<Trigger>`, so Anchor checks it is owned by this
      * program and carries the Trigger discriminator. That replaces the
      * EVM ZeroTrigger / InvalidTrigger / reportCount() probe checks.
      */
-    trigger: TAccountMetas[1];
+    trigger: TAccountMetas[2];
     /** Collateral mint (USDC on mainnet, RDX test token locally). */
-    mint: TAccountMetas[2];
-    bond: TAccountMetas[3];
+    mint: TAccountMetas[3];
+    bond: TAccountMetas[4];
     /** Holds coupon budget + principal. Owned by the bond PDA. */
-    vault: TAccountMetas[4];
-    tokenProgram: TAccountMetas[5];
-    systemProgram: TAccountMetas[6];
+    vault: TAccountMetas[5];
+    tokenProgram: TAccountMetas[6];
+    systemProgram: TAccountMetas[7];
   };
   data: CreateBondInstructionData;
 };
@@ -622,12 +687,12 @@ export function parseCreateBondInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedCreateBondInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 7) {
+  if (instruction.accounts.length < 8) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 7,
+        expectedAccountMetas: 8,
       },
     );
   }
@@ -640,6 +705,7 @@ export function parseCreateBondInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: {
+      payer: getNextAccount(),
       sponsor: getNextAccount(),
       trigger: getNextAccount(),
       mint: getNextAccount(),

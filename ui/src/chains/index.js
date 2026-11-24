@@ -14,6 +14,7 @@ import {
 import {
   isSolanaAddress, useSolanaWallet, useSolanaBond, useSolanaTrigger, useSolanaTriggerHistory,
   useSolanaPosition, useSolanaActions, useSolanaTriggerActions, useSolanaCreateBond, useSolanaCreateTrigger,
+  findSolanaBondNetwork,
 } from './solana/adapter'
 import { defaultNetwork, networkById } from './registry'
 
@@ -67,6 +68,19 @@ export function makeBondRef(input, network = null) {
   // follow the wallet).
   const net = network ?? (family === FAMILY.SOLANA ? defaultNetwork(FAMILY.SOLANA)?.id ?? null : null)
   return { family, network: net, address }
+}
+
+/**
+ * makeBondRef, but a bare Solana address is pinned to the network that
+ * actually holds the bond (localnet and devnet can both be configured at
+ * once), falling back to the default when no network has it.
+ * @returns {Promise<import('./types').BondRef|null>}
+ */
+export async function resolveBondRef(input) {
+  const ref = makeBondRef(input)
+  if (ref?.family !== FAMILY.SOLANA) return ref
+  const network = await findSolanaBondNetwork(ref.address)
+  return network ? { ...ref, network } : ref
 }
 
 const on = (ref, family) => (ref?.family === family ? ref : null)
