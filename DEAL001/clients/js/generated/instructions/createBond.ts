@@ -214,7 +214,8 @@ export type CreateBondAsyncInput<
 > = {
   /**
    * Whoever posts the deal (the EVM deployer): signs and pays rent for
-   * the bond and vault. Gets no rights over the bond.
+   * the bond and vault, and the bond's address derives from it (so no one
+   * else can occupy it in advance). Gets no rights over the bond.
    */
   payer: TAccountPayer;
   /**
@@ -443,7 +444,8 @@ export type CreateBondInput<
 > = {
   /**
    * Whoever posts the deal (the EVM deployer): signs and pays rent for
-   * the bond and vault. Gets no rights over the bond.
+   * the bond and vault, and the bond's address derives from it (so no one
+   * else can occupy it in advance). Gets no rights over the bond.
    */
   payer: TAccountPayer;
   /**
@@ -653,7 +655,8 @@ export type ParsedCreateBondInstruction<
   accounts: {
     /**
      * Whoever posts the deal (the EVM deployer): signs and pays rent for
-     * the bond and vault. Gets no rights over the bond.
+     * the bond and vault, and the bond's address derives from it (so no one
+     * else can occupy it in advance). Gets no rights over the bond.
      */
     payer: TAccountMetas[0];
     /**

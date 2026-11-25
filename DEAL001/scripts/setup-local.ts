@@ -10,8 +10,9 @@
 //   { "investor": "<addr>", "sponsor": "<addr>", "company": "<addr>" }
 // Each is funded with SOL + RDX. The test "company" also becomes the bond's
 // company wallet and the triggers' reporter, so it can settle, mature, verify
-// and post reports. The seeded bond's sponsor stays the generated one:
-// create_bond needs the sponsor's signature, and we only hold public keys.
+// and post reports. The seeded bond is posted by the generated sponsor (the
+// payer, whose key we hold); the sponsor is just an address, so a test wallet
+// could be named instead.
 //
 // Writes:
 //   DEAL001/.localnet/addresses.json      everything below, for scripts
@@ -121,8 +122,8 @@ const pda = async (seeds: (string | Uint8Array)[]) =>
   (await getProgramDerivedAddress({ programAddress: CAT_BOND_PROGRAM_ADDRESS, seeds }))[0]
 const triggerPda = (owner: Address, id: bigint) =>
   pda(['trigger', getAddressEncoder().encode(owner), getU64Encoder().encode(id)])
-const bondPda = (sponsor: Address, bondId: Uint8Array) =>
-  pda(['bond', getAddressEncoder().encode(sponsor), bondId])
+const bondPda = (payer: Address, bondId: Uint8Array) =>   // the address derives from whoever posts the deal
+  pda(['bond', getAddressEncoder().encode(payer), bondId])
 
 const step = (s: string) => console.log(`\n── ${s} ${'─'.repeat(Math.max(0, 52 - s.length))}`)
 

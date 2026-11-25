@@ -84,6 +84,8 @@ export function getBondDiscriminatorBytes(): ReadonlyUint8Array {
 export type Bond = {
   discriminator: ReadonlyUint8Array;
   bondId: ReadonlyUint8Array;
+  /** Who posted the deal; one of the PDA seeds. Holds no rights over the bond. */
+  payer: Address;
   sponsor: Address;
   companyWallet: Address;
   trigger: Address;
@@ -116,6 +118,8 @@ export type Bond = {
 
 export type BondArgs = {
   bondId: ReadonlyUint8Array;
+  /** Who posted the deal; one of the PDA seeds. Holds no rights over the bond. */
+  payer: Address | HasAddress;
   sponsor: Address | HasAddress;
   companyWallet: Address | HasAddress;
   trigger: Address | HasAddress;
@@ -152,6 +156,7 @@ export function getBondEncoder(): Encoder<BondArgs> {
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["bondId", fixEncoderSize(getBytesEncoder(), 32)],
+      ["payer", getAddressEncoder()],
       ["sponsor", getAddressEncoder()],
       ["companyWallet", getAddressEncoder()],
       ["trigger", getAddressEncoder()],
@@ -188,6 +193,7 @@ export function getBondDecoder(): Decoder<Bond> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["bondId", fixDecoderSize(getBytesDecoder(), 32)],
+    ["payer", getAddressDecoder()],
     ["sponsor", getAddressDecoder()],
     ["companyWallet", getAddressDecoder()],
     ["trigger", getAddressDecoder()],

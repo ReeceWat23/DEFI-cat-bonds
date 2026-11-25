@@ -292,6 +292,11 @@ impl Deal {
     /// Like `create_bond_with`, but `payer` posts the deal (signs + pays rent)
     /// for `self.sponsor`, as an EVM deployer passes `_sponsor`.
     pub fn create_bond_by(&mut self, payer: &Keypair, edit: impl FnOnce(&mut CreateBondArgs)) -> TxResult {
+        // The bond's address derives from the payer, so point the deal at it.
+        let (bond, _) = Pubkey::find_program_address(&[b"bond", payer.pubkey().as_ref(), &self.bond_id], &cat_bond::ID);
+        let (vault, _) = Pubkey::find_program_address(&[b"vault", bond.as_ref()], &cat_bond::ID);
+        self.bond = bond;
+        self.vault = vault;
         let t = &self.terms;
         let mut args = CreateBondArgs {
             bond_id: self.bond_id,

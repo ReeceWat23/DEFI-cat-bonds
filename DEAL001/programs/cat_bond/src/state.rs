@@ -111,12 +111,17 @@ pub struct LastCheck {
     pub checked_by: Pubkey,
 }
 
-/// PDA: ["bond", sponsor, bond_id]
+/// PDA: ["bond", payer, bond_id]
 /// `bond_id` is a 32-byte client-chosen seed; the UI uses sha256(dealId).
+/// The address comes from whoever posted the deal (`payer`), like an EVM
+/// contract address comes from its deployer: nobody else can claim it in
+/// advance by naming the sponsor, which is just an address here.
 #[account]
 #[derive(InitSpace)]
 pub struct Bond {
     pub bond_id: [u8; 32],
+    /// Who posted the deal; one of the PDA seeds. Holds no rights over the bond.
+    pub payer: Pubkey,
 
     // ── Immutable configuration ──
     pub sponsor: Pubkey,

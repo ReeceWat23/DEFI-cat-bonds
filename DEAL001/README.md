@@ -70,7 +70,7 @@ anchor build && anchor keys sync && anchor build                  # real program
 ```bash
 cd DEAL001
 anchor build                    # tests load target/deploy/cat_bond.so
-cargo test                      # 33 tests, < 1 s
+cargo test                      # 34 tests, < 1 s
 npx tsx scripts/e2e-ui-core.ts  # with `npm run localnet` up: the UI's own Solana tx code, end to end
 ```
 
@@ -141,7 +141,7 @@ npm run devnet    # deploy/upgrade cat_bond on devnet, then canonical triggers +
 - [x] UI: Solana wallet + writes beside the EVM path (multi-chain plan phases 0–D)
 - [x] Coupon after maturity: claim in Matured + withdraw sweeps unclaimed coupon, both chains
 - [x] Coupon after a trigger: investors claim the full coupon, both chains
-- [x] EVM parity: `create_bond` takes the sponsor as an address with a separate `payer` signer, like the EVM constructor's `_sponsor`
+- [x] EVM parity: `create_bond` takes the sponsor as an address with a separate `payer` signer (like the EVM constructor's `_sponsor`); the bond address derives from the payer, like an EVM address from its deployer, so no one can squat it
 - [x] Phase F: devnet deploy + triggers + test bonds
 - [ ] One full lifecycle on devnet with Circle devnet USDC
 - [x] Phase E: `network` / `environment` on `rpos`, bonds.py + server.py + Post deal pass them, Solana report path

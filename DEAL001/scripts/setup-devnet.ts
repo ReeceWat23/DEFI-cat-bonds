@@ -161,7 +161,7 @@ async function main() {
 
   step('3. Small-terms test bond (Circle devnet USDC)')
   const bondId = sha256(DEAL_ID)
-  const bond = await pda(['bond', getAddressEncoder().encode(sponsor), bondId])
+  const bond = await pda(['bond', getAddressEncoder().encode(deployer.address), bondId])
   if ((await fetchMaybeBond(rpc, bond)).exists) {
     console.log(`  bond     ${bond}  (exists)`)
   } else {

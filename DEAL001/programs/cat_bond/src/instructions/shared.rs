@@ -86,7 +86,7 @@ pub fn transfer_from_vault<'info>(
         return Ok(());
     }
     let bump = [bond.bump];
-    let seeds: &[&[u8]] = &[BOND_SEED, bond.sponsor.as_ref(), bond.bond_id.as_ref(), &bump];
+    let seeds: &[&[u8]] = &[BOND_SEED, bond.payer.as_ref(), bond.bond_id.as_ref(), &bump];
     let signer_seeds = &[seeds];
 
     token::transfer_checked(

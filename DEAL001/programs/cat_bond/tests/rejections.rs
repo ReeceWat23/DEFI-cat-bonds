@@ -36,6 +36,27 @@ fn anyone_can_post_a_bond_for_a_sponsor_but_only_the_sponsor_funds_it() {
     assert_eq!(d.bond_state().status, Status::Subscription);
 }
 
+/// Nobody can squat a sponsor's bond address: it derives from the payer, so a
+/// stranger posting a bond for the same sponsor and deal id lands elsewhere,
+/// and the sponsor's own deal is still created.
+#[test]
+fn a_stranger_cannot_occupy_a_sponsors_bond_address() {
+    let mut d = Deal::bare(Terms::default());
+    ok(d.create_trigger());
+    let (stranger, sponsor) = (d.stranger.insecure_clone(), d.sponsor.insecure_clone());
+
+    ok(d.create_bond_by(&stranger, |a| a.threshold = 1));
+    let squatter = d.bond;
+    assert_eq!(d.bond_state().payer, stranger.pubkey());
+
+    ok(d.create_bond_by(&sponsor, |_| {}));
+    assert_ne!(d.bond, squatter, "the sponsor's own bond lives at its own address");
+    let b = d.bond_state();
+    assert_eq!(b.payer, sponsor.pubkey());
+    assert_eq!(b.sponsor, sponsor.pubkey());
+    assert_eq!(b.status, Status::Funding);
+}
+
 #[test]
 fn only_the_company_can_settle_or_mature() {
     let mut d = Deal::new();

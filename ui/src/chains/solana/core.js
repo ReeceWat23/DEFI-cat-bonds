@@ -257,7 +257,7 @@ export const build = {
   async createBond(signer, p) {
     const sponsor = toAddress(p.sponsor ?? signer.address)
     const bondId = await sha256(String(p.dealId))
-    const bond = await pdaOf(['bond', getAddressEncoder().encode(sponsor), bondId])
+    const bond = await pdaOf(['bond', getAddressEncoder().encode(signer.address), bondId])
     const ix = await getCreateBondInstructionAsync({
       payer: signer, sponsor, trigger: toAddress(p.trigger), mint: toAddress(p.mint), bond, bondId,
       companyWallet: toAddress(p.companyWallet), threshold: BigInt(p.threshold),

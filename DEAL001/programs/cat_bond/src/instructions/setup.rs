@@ -32,7 +32,8 @@ pub struct CreateBondArgs {
 #[instruction(args: CreateBondArgs)]
 pub struct CreateBond<'info> {
     /// Whoever posts the deal (the EVM deployer): signs and pays rent for
-    /// the bond and vault. Gets no rights over the bond.
+    /// the bond and vault, and the bond's address derives from it (so no one
+    /// else can occupy it in advance). Gets no rights over the bond.
     #[account(mut)]
     pub payer: Signer<'info>,
 
@@ -54,7 +55,7 @@ pub struct CreateBond<'info> {
         init,
         payer = payer,
         space = 8 + Bond::INIT_SPACE,
-        seeds = [BOND_SEED, sponsor.key().as_ref(), args.bond_id.as_ref()],
+        seeds = [BOND_SEED, payer.key().as_ref(), args.bond_id.as_ref()],
         bump,
     )]
     pub bond: Account<'info, Bond>,
@@ -99,6 +100,7 @@ pub fn create_bond(ctx: Context<CreateBond>, args: CreateBondArgs) -> Result<()>
     let bond = &mut ctx.accounts.bond;
     bond.set_inner(Bond {
         bond_id: args.bond_id,
+        payer: ctx.accounts.payer.key(),
         sponsor: ctx.accounts.sponsor.key(),
         company_wallet: args.company_wallet,
         trigger: ctx.accounts.trigger.key(),
