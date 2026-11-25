@@ -27,10 +27,27 @@ SAMPLE_LATEST = [{
 
 # ── build_report ─────────────────────────────────────────────────────────────
 
-def test_build_report_defaults_metadata_to_empty_object():
+def test_build_report_sends_only_the_fields_given():
+    # A revision of one figure must not carry empty values for the others:
+    # the upsert would write them over what is stored.
     r = natcat_store.build_report(2026, "Q1", economic_loss_b=58)
-    assert r["metadata"] == {}
-    assert set(r) == set(natcat_store.WRITABLE_COLUMNS)
+    assert r == {"year": 2026, "period": "Q1", "economic_loss_b": 58}
+    full = natcat_store.build_report(2026, "Q1", economic_loss_b=58, industry_loss_b=20,
+                                     source_url="https://x", as_of="2026-04-01", metadata={"k": 1})
+    assert set(full) == set(natcat_store.WRITABLE_COLUMNS)
+
+
+def test_upsert_sends_one_request_per_field_set(monkeypatch):
+    # PostgREST fills a field some rows omit with NULL on the rows that lack
+    # it, so rows with different fields must not share a request.
+    calls = []
+    monkeypatch.setattr(natcat_store, "_request", lambda method, path, **kw: calls.append(kw["body"]) or kw["body"])
+    a = natcat_store.build_report(2026, "Q1", economic_loss_b=58)
+    b = natcat_store.build_report(2026, "Q2", economic_loss_b=60, industry_loss_b=20)
+    c = natcat_store.build_report(2026, "Q3", economic_loss_b=61)
+    natcat_store.upsert_reports([a, b, c])
+    assert sorted(len(body) for body in calls) == [1, 2]
+    assert {tuple(sorted(r)) for body in calls for r in body} == {tuple(sorted(a)), tuple(sorted(b))}
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -69,6 +86,30 @@ def test_supabase_auth_headers():
     assert fetcher._auth_headers("supabase", "eyJx")["Authorization"] == "Bearer eyJx"
     assert fetcher._auth_headers("bearer", "k") == {
         "Content-Type": "application/json", "Authorization": "Bearer k"}
+
+
+def test_v3_accepts_either_supabase_key_variable(monkeypatch):
+    # The product names SUPABASE_SERVICE_ROLE_KEY; a .env that only sets the
+    # new-style SUPABASE_SECRET_KEY must still fetch (as bonds.py already allows).
+    seen = {}
+
+    class Resp:
+        status_code, content = 200, b"[]"
+        def json(self): return []
+
+    def fake_get(url, headers, params, timeout):
+        seen["headers"] = headers
+        return Resp()
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_x")
+    raw = fetcher.fetch_raw(registry.get("natcat_loss", 3))
+    assert raw["error"] is None
+    assert seen["headers"]["apikey"] == "sb_secret_x"
+
+    monkeypatch.delenv("SUPABASE_SECRET_KEY")
+    assert "is not set" in fetcher.fetch_raw(registry.get("natcat_loss", 3))["error"]
 
 
 # ── live ────────────────────────────────────────────────────────────────────

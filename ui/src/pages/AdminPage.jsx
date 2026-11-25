@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   useWallet, useBond, useTrigger, useTriggerHistory, useBondPosition,
   useBondActions, useTriggerActions, useCreateTrigger, useCreateBond,
-  makeBondRef, isValidAddress, sameAddress, FAMILY, NETWORKS,
+  makeBondRef, resolveBondRef, isValidAddress, sameAddress, FAMILY, NETWORKS,
 } from '../chains'
 import { TESTNET_USDC, RHODEX_COMPANY_WALLET } from '../constants/abis'
 import {
@@ -154,8 +154,14 @@ function DeploySection() {
     dealId: '',           // CatBond.dealId — web2 Deal store record id, if any
   })
 
-  const [triggerAddr, setTriggerAddr] = useState(localStorage.getItem('catbond_trigger') || '')
-  const [bondAddr, setBondAddr] = useState(localStorage.getItem('catbond_address') || '')
+  // The saved addresses are shared with /build and Manage, so one posted on
+  // another chain family (a Solana deal) isn't an EVM contract: ignore it.
+  const savedEvm = key => {
+    const v = localStorage.getItem(key) || ''
+    return isValidAddress(v, ADMIN_FAMILY) ? v : ''
+  }
+  const [triggerAddr, setTriggerAddr] = useState(() => savedEvm('catbond_trigger'))
+  const [bondAddr, setBondAddr] = useState(() => savedEvm('catbond_address'))
 
   // Pre-fill sponsor from the connected address, company wallet from the
   // fixed constant — never the connected address. That field stays editable
@@ -232,6 +238,7 @@ function DeploySection() {
 
   function handleDeployBond() {
     if (!triggerAddr) return alert('Deploy trigger first (Step 1)')
+    if (!isValidAddress(triggerAddr, ADMIN_FAMILY)) return alert('The saved trigger is not an EVM address. Run Step 1 to deploy one.')
     if (triggerMissing) return alert(`No trigger found at ${triggerAddr} on the connected network — it's probably from an earlier chain. Run Step 1 to deploy a fresh one.`)
     if (!isValidAddress(form.sponsor, ADMIN_FAMILY)) return alert('Invalid sponsor address')
     if (!isValidAddress(form.companyWallet, ADMIN_FAMILY)) return alert('Invalid company wallet address')
@@ -551,7 +558,16 @@ function ManageSection() {
 
   // The pasted bond address decides the chain (0x… = EVM, base58 = Solana),
   // and with it which wallet acts.
-  const bondRef = makeBondRef(bondAddress)
+  // A bare Solana address is pinned to the network that actually holds it
+  // (localnet and devnet can both be configured), found asynchronously; the
+  // plain ref is used until then so the family is right immediately.
+  const [bondRef, setBondRef] = useState(() => makeBondRef(bondAddress))
+  useEffect(() => {
+    let live = true
+    setBondRef(makeBondRef(bondAddress))
+    resolveBondRef(bondAddress).then(ref => { if (live) setBondRef(ref) })
+    return () => { live = false }
+  }, [bondAddress])
   const family = bondRef?.family ?? ADMIN_FAMILY
   const { address, isConnected } = useWallet(family)
   const validBond = !!bondRef

@@ -32,6 +32,10 @@ from . import value_path as value_path_module
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
+# The two ways a Supabase server key can be configured (see ../bonds.py).
+SUPABASE_KEY_VARS = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY")
+
+
 def fetch_raw(product: dict, timeout: int = 10) -> dict:
     """
     Perform the HTTP call described by `product`. Does not touch
@@ -43,6 +47,9 @@ def fetch_raw(product: dict, timeout: int = 10) -> dict:
     """
     auth_env_var = product["auth"]
     secret = os.environ.get(auth_env_var, "")
+    if not secret and auth_env_var in SUPABASE_KEY_VARS:
+        # bonds.py and natcat_store.py accept either Supabase key variable.
+        secret = next((os.environ[v] for v in SUPABASE_KEY_VARS if os.environ.get(v)), "")
     if not secret:
         return _raw_failure(None, None, f"secret env var {auth_env_var!r} is not set")
 

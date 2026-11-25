@@ -60,15 +60,16 @@ def build_report(
         raise ValueError("a report needs at least one of economic_loss_b / industry_loss_b")
     if metadata is not None and not isinstance(metadata, dict):
         raise ValueError("metadata must be a JSON object (dict)")
-    return {
-        "year": int(year),
-        "period": period,
-        "economic_loss_b": economic_loss_b,
-        "industry_loss_b": industry_loss_b,
-        "source_url": source_url or None,
-        "as_of": as_of or None,
-        "metadata": metadata or {},
-    }
+    # Only the fields the caller gave: an upsert merges what is sent, so a
+    # revision of one figure must not carry empty values for the others (that
+    # would overwrite the stored ones). The table's defaults fill a new row.
+    report = {"year": int(year), "period": period}
+    for col, val in (("economic_loss_b", economic_loss_b), ("industry_loss_b", industry_loss_b),
+                     ("source_url", source_url or None), ("as_of", as_of or None),
+                     ("metadata", metadata)):
+        if val is not None:
+            report[col] = val
+    return report
 
 
 def upsert_reports(reports: list[dict]) -> list[dict]:
@@ -80,8 +81,17 @@ def upsert_reports(reports: list[dict]) -> list[dict]:
         unknown = set(r) - set(WRITABLE_COLUMNS)
         if unknown:
             raise ValueError(f"unknown report fields: {sorted(unknown)}")
-    return _request("POST", TABLE, params={"on_conflict": "year,period"}, body=reports,
-                    prefer="resolution=merge-duplicates,return=representation")
+    # One request per distinct set of fields: PostgREST fills a field that
+    # some rows omit with NULL for the rows that lack it, which would wipe
+    # stored values on an update.
+    groups: dict[tuple, list[dict]] = {}
+    for r in reports:
+        groups.setdefault(tuple(sorted(r)), []).append(r)
+    stored: list[dict] = []
+    for body in groups.values():
+        stored += _request("POST", TABLE, params={"on_conflict": "year,period"}, body=body,
+                           prefer="resolution=merge-duplicates,return=representation")
+    return stored
 
 
 def list_reports(year: int | None = None) -> list[dict]:

@@ -121,6 +121,10 @@ export default function ReviewSection({ state, network }) {
   // CANONICAL_TRIGGERS are hard-coded per chain; after an anvil restart they
   // point at nothing, and CatBond's constructor rejects them (InvalidTrigger).
   const triggerMissing = !!triggerAddr && canonicalTrigger?.exists === false
+  // Post only once the trigger is read and carries its product id + version:
+  // the deal record stores them, and a still-loading or failed read would
+  // save the row with both empty.
+  const triggerReady = canonicalTrigger?.exists === true && !!triggerProductId && triggerProductVersion !== undefined
 
   // Solana: the network's collateral mint is known, so pre-fill it.
   const [usdcAddr, setUsdcAddr] = useState(onSolana ? SOLANA_NET?.mint ?? '' : '')
@@ -217,7 +221,7 @@ export default function ReviewSection({ state, network }) {
   const currencyLabel = network === 'mainnet' ? 'USDC' : 'RDX'
   const listingFee = Math.round(layer.raise * 0.0005)
   const isBusy = bondPending || bondConfirming || creatingBond
-  const canPost = isConnected && isValidAddress(usdcAddr, family) && !!triggerAddr && !triggerMissing && !!companyWallet && !isBusy && !bondAddr
+  const canPost = isConnected && isValidAddress(usdcAddr, family) && !!triggerAddr && triggerReady && !!companyWallet && !isBusy && !bondAddr
   const error = bondError
 
   if (bondAddr) {
