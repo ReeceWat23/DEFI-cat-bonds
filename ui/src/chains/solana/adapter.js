@@ -12,6 +12,7 @@ import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { address as toAddress, createSolanaRpc, isAddress, unwrapOption } from '@solana/kit'
 import { useWallet as useAdapterWallet } from '@solana/wallet-adapter'
+import { createSignerFromWalletAccount } from '@solana/wallet-account-signer'
 import { useWalletModal } from '@solana/wallet-adapter/ui'
 import {
   BOND_DISCRIMINATOR, POSITION_DISCRIMINATOR, REPORT_DISCRIMINATOR, TRIGGER_DISCRIMINATOR,
@@ -201,16 +202,30 @@ const IDLE = { isWriting: false, isConfirming: false, isConfirmed: false, hash: 
  * banner. `run(netId, buildFn)` builds instructions with the wallet's signer
  * and sends them via core.sendInstructions. Resolves to the signature, or
  * undefined on error (the error lands in `tx.error`).
+ *
+ * The signer is made per write for that network's wallet chain (e.g.
+ * 'solana:devnet'), so the wallet always signs for the network the bond or
+ * trigger lives on, whatever the provider's default chain is. One page can
+ * write to localnet and devnet side by side (the Admin page does).
  */
+function signerFor(account, net) {
+  if (!account) throw chainError('Connect a Solana wallet first.')
+  try {
+    return createSignerFromWalletAccount(account, net.walletChain)
+  } catch {
+    throw chainError(`Your wallet can't sign for ${net.label} (${net.walletChain}). Switch wallets or use a wallet that supports it.`)
+  }
+}
+
 function useSolanaWriteSlot() {
-  const { signer } = useAdapterWallet()
+  const { account } = useAdapterWallet()
   const [tx, setTx] = useState(IDLE)
 
   const run = useCallback(async (netId, buildFn) => {
     setTx({ ...IDLE, isWriting: true })
     try {
-      if (!signer) throw chainError('Connect a Solana wallet first.')
-      const { rpc } = rpcFor(netId)
+      const { rpc, net } = rpcFor(netId)
+      const signer = signerFor(account, net)
       const instructions = await buildFn(signer, rpc)
       const signature = await sendInstructions(rpc, signer, instructions, {
         onSent: (sig) => setTx({ ...IDLE, isConfirming: true, hash: sig }),
@@ -222,7 +237,7 @@ function useSolanaWriteSlot() {
       setTx({ ...IDLE, error: err })
       return undefined
     }
-  }, [signer])
+  }, [account])
 
   return { run, tx }
 }

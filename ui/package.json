@@ -13,6 +13,7 @@
     "@react-three/fiber": "^9.8.2",
     "@solana-program/token": "^0.18.0",
     "@solana/kit": "^8.6.0",
+    "@solana/wallet-account-signer": "8.6.0",
     "@solana/wallet-adapter": "^3.2.1",
     "@solana/web3.js": "^3.2.1",
     "@tanstack/react-query": "^5.56.0",

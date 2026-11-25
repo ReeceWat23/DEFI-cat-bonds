@@ -8,15 +8,14 @@ import { WalletProvider as SolanaWalletProvider } from '@solana/wallet-adapter'
 import { WalletModalProvider } from '@solana/wallet-adapter/ui'
 import '@solana/wallet-adapter/styles.css'   // all rules are scoped to .wallet-adapter-*
 import { config as evmConfig } from './evm/config'
-import { defaultNetwork } from './registry'
-import { FAMILY } from './types'
 
 const queryClient = new QueryClient()
 
-// One Solana wallet provider = one chain. Localnet while DEAL001's validator
-// setup has run, otherwise devnet. Wallets that don't advertise this chain
-// are hidden from the picker.
-const SOLANA_WALLET_CHAIN = defaultNetwork(FAMILY.SOLANA)?.walletChain ?? 'solana:devnet'
+// The provider's chain only decides which wallets the picker lists (those
+// that advertise it). Signing is per network: every write builds a signer for
+// its own network's wallet chain (solana/adapter.js), so a devnet bond is
+// signed for devnet even while localnet is running.
+const SOLANA_WALLET_CHAIN = 'solana:devnet'
 
 export function ChainProvider({ children }) {
   return (
